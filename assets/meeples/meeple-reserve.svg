@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" role="img" aria-label="meeple reserve placeholder">
+  <g fill="#8b8b8b" stroke="#333" stroke-width="3.2" stroke-linejoin="round">
+    <circle cx="28" cy="13" r="8"/>
+    <path d="M19 25c-6 2-10 7-10 14v5h8v-7h3v14h16V37h3v7h8v-5c0-7-4-12-10-14l-3 5H22z"/>
+  </g>
+</svg>

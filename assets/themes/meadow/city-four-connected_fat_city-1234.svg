@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_都市" data-name="都市" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #ea5554;
+      }
+
+      .cls-2 {
+        fill: #842e1f;
+      }
+    </style>
+  </defs>
+  <polygon class="cls-1" points="51.32 120 120 25.47 188.68 120 120 214.53 51.32 120"/>
+  <path class="cls-2" d="M120,28.02l66.83,91.98-66.83,91.98L53.17,120,120,28.02M120,22.92L49.47,120l70.53,97.08,70.53-97.08L120,22.92h0Z"/>
+</svg>

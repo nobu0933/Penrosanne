@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Penrosanne — 描画プロトタイプ</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<main class="app-shell">
+			<header class="topbar">
+				<a class="brand" href="#" aria-label="Penrosanne ホーム"
+					>PENROSANNE <span>prototype</span></a
+				>
+				<div class="status"><i></i> 描画・操作プロトタイプ</div>
+				<a class="topbar-link" href="tile-gallery.html">タイル一覧・デバッグ</a>
+				<button
+					id="reset-view"
+					class="icon-button"
+					title="表示をリセット"
+					aria-label="表示をリセット"
+				>
+					◎
+				</button>
+			</header>
+
+			<section class="workspace">
+				<aside class="left-panel panel">
+					<p id="active-player-label" class="eyebrow">PLAYER 01</p>
+					<h1 id="turn-heading">あなたの手番</h1>
+					<div class="score-row"><span>確定得点</span><strong>12</strong></div>
+					<div class="meeple-row">
+						<span>残りミープル</span>
+						<div id="meeple-count" class="meeples" aria-label="残りミープル">● ● ● ● ● ● ●</div>
+					</div>
+					<hr />
+					<p class="eyebrow">GAME DECK</p>
+					<label class="deck-picker" for="deck-select">山札
+						<select id="deck-select" aria-label="使用する山札"></select>
+					</label>
+					<button id="start-deck" class="primary">この山札で新しいゲーム</button>
+					<p class="eyebrow">CURRENT TILE</p>
+					<div class="current-tile-wrap">
+						<canvas id="current-tile" width="220" height="180" aria-label="現在のタイル"></canvas>
+						<button id="redo-tile" class="primary hidden">↩ やり直す</button>
+						<button id="redraw-tile">↺ 引き直し</button>
+						<button id="mirror-tile">⇋ タイルを反転（1回）</button>
+					</div>
+					<p id="tile-label" class="tile-label"></p>
+					<div id="meeple-options" class="meeple-options" aria-live="polite"></div>
+				</aside>
+
+				<section class="board-area">
+					<div class="board-heading">
+						<div>
+							<p class="eyebrow">BOARD</p>
+							<h2>ひし形の谷</h2>
+						</div>
+						<div class="legend">
+							<span><b class="regular"></b>通常</span><span><b class="forbidden"></b>紫：相対禁則</span
+							><span><b class="arrow-override"></b>橙：3辺接続・矢印無視</span>
+						</div>
+					</div>
+					<div id="board-frame" class="board-frame">
+						<canvas id="board" aria-label="ゲーム盤面"></canvas>
+						<div id="placement-actions" class="placement-actions hidden">
+							<button id="rotate-tile" title="180度回転" aria-label="180度回転">↻</button>
+							<button id="confirm-placement" class="primary" title="配置を確定" aria-label="配置を確定">✓</button>
+							<button id="skip-meeple" class="primary" title="ミープルを置かない" aria-label="ミープルを置かない">→</button>
+						</div>
+						<div class="board-help">
+							ドラッグで移動　／　ホイールで拡大縮小　／　候補をクリックして配置
+						</div>
+					</div>
+					<div class="board-actions">
+						<button id="force-end" title="デバッグ用：ただちに終局得点を計算します">デバッグ：強制終了・採点</button>
+					</div>
+				</section>
+
+				<aside class="right-panel panel">
+					<p class="eyebrow">SETTINGS</p>
+					<h2>プロトタイプ設定</h2>
+					<label>タイルテーマ
+						<select id="theme-select">
+							<option value="none">テーマなし（デバッグ）</option>
+							<option value="meadow">草原</option>
+							<option value="cyber">サイバー</option>
+						</select>
+					</label>
+					<label>タイル辺長 <output id="side-length">画面高の 1/5</output></label>
+					<label class="switch-row"
+						><input id="vertex-toggle" type="checkbox" checked /> 頂点色を表示</label
+					>
+					<hr />
+					<p class="eyebrow">DECK</p>
+					<div class="deck-stat"><strong id="thin-count">10</strong><span>THIN</span></div>
+					<div class="deck-stat"><strong id="fat-count">11</strong><span>FAT</span></div>
+					<p class="small-note">
+						試作セット。開始タイルはランダム、青赤頂点もランダムに決定されます。
+					</p>
+					<hr />
+					<p class="eyebrow">SCORES</p>
+					<div id="scoreboard" class="scoreboard" aria-live="polite"></div>
+					<div id="final-score-details" class="final-score-details hidden" aria-live="polite"></div>
+					<hr />
+					<p class="eyebrow">SCOPE</p>
+					<p class="small-note">
+						草原は終局時、隣接する完成都市1つにつき3点です。四角の候補は草原（終局まで残留）、丸は完成時に回収できる領域です。
+					</p>
+				</aside>
+			</section>
+		</main>
+		<script type="module" src="src/main.js"></script>
+	</body>
+</html>

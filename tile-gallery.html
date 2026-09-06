@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Penrosanne — タイル一覧・デバッグ</title>
+		<link rel="stylesheet" href="styles.css" />
+	</head>
+	<body>
+		<main class="app-shell">
+			<header class="topbar">
+				<a class="brand" href="index.html" aria-label="ゲーム画面へ戻る"
+					>PENROSANNE <span>tile debug</span></a
+				>
+				<div class="status"><i></i> タイル定義・アンカー確認</div>
+				<a class="topbar-link" href="index.html">ゲームへ戻る</a>
+			</header>
+
+			<section class="tile-gallery-page" aria-labelledby="gallery-heading">
+				<div class="tile-gallery-toolbar panel">
+					<div>
+						<p class="eyebrow">DEBUG TILE CATALOG</p>
+						<h1 id="gallery-heading">タイル一覧</h1>
+						<p class="small-note">アンカーへカーソルを合わせると、ゲーム画面と同じ領域だけを着色します。ドラッグやクリックでゲーム状態は変わりません。</p>
+					</div>
+					<label class="gallery-theme-label">タイルテーマ
+						<select id="gallery-theme-select">
+							<option value="none">テーマなし（デバッグ）</option>
+							<option value="meadow" selected>草原</option>
+							<option value="cyber">サイバー</option>
+						</select>
+					</label>
+				</div>
+				<div id="tile-gallery" class="tile-gallery" aria-live="polite"></div>
+			</section>
+		</main>
+		<script type="module" src="src/tile-gallery.js"></script>
+	</body>
+</html>
