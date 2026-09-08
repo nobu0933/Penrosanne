@@ -49,12 +49,12 @@ export function verticesFor(tile, side) {
 // `verticalInverse` は地形／カードを反転せず、矢印だけを上下反転する。
 const NORMAL_ARROWS = {
 	thin: {
-		AB: { from: 'B', to: 'A', heads: 2 }, DA: { from: 'D', to: 'A', heads: 2 },
-		BC: { from: 'B', to: 'C', heads: 1 }, CD: { from: 'D', to: 'C', heads: 1 },
+		AB: { from: 'B', to: 'A', heads: 1 }, DA: { from: 'D', to: 'A', heads: 1 },
+		BC: { from: 'B', to: 'C', heads: 2 }, CD: { from: 'D', to: 'C', heads: 2 },
 	},
 	fat: {
-		EF: { from: 'E', to: 'F', heads: 2 }, HE: { from: 'E', to: 'H', heads: 2 },
-		FG: { from: 'F', to: 'G', heads: 1 }, GH: { from: 'H', to: 'G', heads: 1 },
+		EF: { from: 'F', to: 'E', heads: 1 }, HE: { from: 'H', to: 'E', heads: 1 },
+		FG: { from: 'G', to: 'F', heads: 2 }, GH: { from: 'G', to: 'H', heads: 2 },
 	},
 };
 

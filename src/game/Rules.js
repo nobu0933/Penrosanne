@@ -5,23 +5,23 @@ const EPSILON = 1e-5;
 const samePoint = (a, b) => Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON;
 const angle = (from, to) => Math.atan2(to.y - from.y, to.x - from.x);
 
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), preventUnfillableGaps = false, tileOptions = [], fillabilityCache = null } = {}) {
-	const legal = arrowPlacementCandidates(board, rawTile, targets);
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), preventUnfillableGaps = false, tileOptions = [], fillabilityCache = null, allowVerticalArrowPattern = true } = {}) {
+	const legal = arrowPlacementCandidates(board, rawTile, targets, { allowVerticalArrowPattern });
 	if (!preventUnfillableGaps) return legal;
-	return legal.filter((candidate) => fillabilityClass(board, candidate, tileOptions, fillabilityCache) === 'regular');
+	return legal.filter((candidate) => fillabilityClass(board, candidate, tileOptions, fillabilityCache, { allowVerticalArrowPattern }) === 'regular');
 }
 
 // 絶対禁則（物理的に埋められない）は常に除外する。相対禁則は矢印だけが原因で
 // 将来の空き辺を満たせない候補であり、何度でも配置できる。
-export function placementCandidateGroups(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowRelativePlacement = true, allowArrowOverride = false } = {}) {
+export function placementCandidateGroups(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowRelativePlacement = true, allowArrowOverride = false, allowVerticalArrowPattern = true } = {}) {
 	const regular = [], relative = [], relativeBlocked = [], arrowOverride = [];
 	const allGeometry = terrainPlacementCandidates(board, rawTile, targets);
 	const legalByGeometry = new Map();
-	for (const candidate of arrowPlacementCandidates(board, rawTile, targets)) legalByGeometry.set(placementKey(candidate), candidate);
+	for (const candidate of arrowPlacementCandidates(board, rawTile, targets, { allowVerticalArrowPattern })) legalByGeometry.set(placementKey(candidate), candidate);
 	for (const geometry of allGeometry) {
 		const legal = legalByGeometry.get(placementKey(geometry));
-		const candidate = legal || chooseArrowOverridePattern(board, geometry);
-		const kind = fillabilityClass(board, candidate, tileOptions, fillabilityCache);
+		const candidate = legal || chooseArrowOverridePattern(board, geometry, { allowVerticalArrowPattern });
+		const kind = fillabilityClass(board, candidate, tileOptions, fillabilityCache, { allowVerticalArrowPattern });
 		if (kind === 'absolute') continue;
 		if (legal) {
 			if (kind === 'regular') regular.push(legal);
@@ -37,10 +37,10 @@ export function placementCandidateGroups(board, rawTile, { targets = board.freeE
 function terrainPlacementCandidates(board, rawTile, targets) {
 	return geometricPlacementCandidates(board, rawTile, targets, { requireTerrain: true, requireArrows: false });
 }
-function arrowPlacementCandidates(board, rawTile, targets) {
-	return geometricPlacementCandidates(board, rawTile, targets, { requireTerrain: true, requireArrows: true });
+function arrowPlacementCandidates(board, rawTile, targets, options = {}) {
+	return geometricPlacementCandidates(board, rawTile, targets, { requireTerrain: true, requireArrows: true, ...options });
 }
-function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain, requireArrows }) {
+function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain, requireArrows, allowVerticalArrowPattern = true }) {
 	const results = new Map();
 	for (const { edge: targetEdge } of targets) for (const sourceEdge of edgesFor({ ...rawTile, centerX: 0, centerY: 0, rotation: 0 }, board.side)) {
 		if (requireTerrain && sourceEdge.terrain !== targetEdge.terrain) continue;
@@ -54,7 +54,7 @@ function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain,
 		// 生成起点以外の辺にも同時に接する場合がある。矢印無視権で
 		// 例外にできるのは矢印だけであり、地形不一致は候補に含めない。
 		if (requireTerrain && !allSharedTerrainMatch(board, base)) continue;
-		const candidate = requireArrows ? resolveArrowPatterns(board, base) : base;
+		const candidate = requireArrows ? resolveArrowPatterns(board, base, { allowVerticalArrowPattern }) : base;
 		if (candidate) results.set(placementKey(candidate), candidate);
 	}
 	return [...results.values()];
@@ -77,26 +77,26 @@ function allSharedTerrainMatch(board, tile) {
 
 // absolute: 一方の形状も重ならずに入らない辺がある。
 // relative: 物理的には入るが、矢印マッチングを満たす形状がない辺がある。
-function fillabilityClass(board, placedTile, tileOptions, fillabilityCache) {
+function fillabilityClass(board, placedTile, tileOptions, fillabilityCache, { allowVerticalArrowPattern = true } = {}) {
 	const hypothetical = boardWithTile(board, placedTile), options = distinctTileOptions(tileOptions);
-	const before = new Map(board.freeEdges().map((freeEdge) => [freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options, fillabilityCache)]));
+	const before = new Map(board.freeEdges().map((freeEdge) => [freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options, fillabilityCache, null, { allowVerticalArrowPattern })]));
 	let relative = false;
 	for (const freeEdge of hypothetical.freeEdges()) {
 		const previous = before.get(freeEdgeKey(freeEdge.edge));
 		// 既存の相対禁則は次手番の候補を相対禁則にしない。
 		if (previous && previous.matching === false) continue;
-		const status = freeEdgeStatus(hypothetical, freeEdge, options, fillabilityCache, placedTile);
+		const status = freeEdgeStatus(hypothetical, freeEdge, options, fillabilityCache, placedTile, { allowVerticalArrowPattern });
 		if (!status.physical) return 'absolute';
 		if (!status.matching) relative = true;
 	}
 	return relative ? 'relative' : 'regular';
 }
 function boardWithTile(board, tile) { const hypothetical = new Board(board.side); hypothetical.tiles = [...board.tiles, tile]; return hypothetical; }
-function freeEdgeStatus(board, freeEdge, options, cache, placedTile = null) {
+function freeEdgeStatus(board, freeEdge, options, cache, placedTile = null, { allowVerticalArrowPattern = true } = {}) {
 	const key = freeEdgeKey(freeEdge.edge), cached = cache?.get(key);
 	if (!placedTile && cached !== undefined) return normalizeStatus(cached);
 	if (placedTile && !edgeIsNearPlacedTile(freeEdge, placedTile, board.side) && cached !== undefined) return normalizeStatus(cached);
-	return { physical: Boolean(findWitness(board, freeEdge, options, false)), matching: Boolean(findWitness(board, freeEdge, options, true)) };
+	return { physical: Boolean(findWitness(board, freeEdge, options, false, { allowVerticalArrowPattern })), matching: Boolean(findWitness(board, freeEdge, options, true, { allowVerticalArrowPattern })) };
 }
 function normalizeStatus(value) {
 	if (value && typeof value === 'object' && 'physical' in value) return value;
@@ -107,20 +107,20 @@ function edgeIsNearPlacedTile(freeEdge, placedTile, side) {
 	const midpoint = { x: (freeEdge.edge.a.x + freeEdge.edge.b.x) / 2, y: (freeEdge.edge.a.y + freeEdge.edge.b.y) / 2 };
 	return Math.hypot(midpoint.x - placedTile.centerX, midpoint.y - placedTile.centerY) <= side * 3.05;
 }
-export function createFillabilityCache(board, tileOptions) {
+export function createFillabilityCache(board, tileOptions, { allowVerticalArrowPattern = true } = {}) {
 	const options = distinctTileOptions(tileOptions), cache = new Map();
-	for (const freeEdge of board.freeEdges()) cache.set(freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options));
+	for (const freeEdge of board.freeEdges()) cache.set(freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options, null, null, { allowVerticalArrowPattern }));
 	return cache;
 }
-export function updateFillabilityCache(board, placedTile, tileOptions, previous = new Map()) {
+export function updateFillabilityCache(board, placedTile, tileOptions, previous = new Map(), { allowVerticalArrowPattern = true } = {}) {
 	const options = distinctTileOptions(tileOptions), next = new Map();
-	for (const freeEdge of board.freeEdges()) next.set(freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options, previous, placedTile));
+	for (const freeEdge of board.freeEdges()) next.set(freeEdgeKey(freeEdge.edge), freeEdgeStatus(board, freeEdge, options, previous, placedTile, { allowVerticalArrowPattern }));
 	return next;
 }
 function distinctTileOptions(tileOptions) { const unique = new Map(); for (const tile of tileOptions) if (!unique.has(tile.shape)) unique.set(tile.shape, tile); return [...unique.values()]; }
-function findWitness(board, freeEdge, options, requireArrows) {
+function findWitness(board, freeEdge, options, requireArrows, { allowVerticalArrowPattern = true } = {}) {
 	for (const option of options) {
-		const candidate = geometricPlacementCandidates(board, option, [freeEdge], { requireTerrain: false, requireArrows })[0];
+		const candidate = geometricPlacementCandidates(board, option, [freeEdge], { requireTerrain: false, requireArrows, allowVerticalArrowPattern })[0];
 		if (candidate) return candidate;
 	}
 	return null;
@@ -128,19 +128,20 @@ function findWitness(board, freeEdge, options, requireArrows) {
 function freeEdgeKey(edge) { const pointKey = (point) => `${Math.round(point.x / EPSILON)}:${Math.round(point.y / EPSILON)}`; return [pointKey(edge.a), pointKey(edge.b)].sort().join('|'); }
 function placementKey(tile) { return `${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(tile.rotation / EPSILON)}`; }
 
-export function resolveArrowPatterns(board, rawTile) {
+export function resolveArrowPatterns(board, rawTile, { allowVerticalArrowPattern = true } = {}) {
 	const unresolved = board.tiles.filter((tile) => !tile.arrowPattern);
-	const combinations = unresolved.reduce((all, tile) => all.flatMap((patterns) => arrowPatterns(tile.shape).map((pattern) => [...patterns, [tile.id, pattern]])), [[]]);
-	for (const arrowPattern of arrowPatterns(rawTile.shape)) for (const assignments of combinations) {
+	const patternsFor = (shape) => allowVerticalArrowPattern ? arrowPatterns(shape) : ['normal'];
+	const combinations = unresolved.reduce((all, tile) => all.flatMap((patterns) => patternsFor(tile.shape).map((pattern) => [...patterns, [tile.id, pattern]])), [[]]);
+	for (const arrowPattern of patternsFor(rawTile.shape)) for (const assignments of combinations) {
 		const assignmentMap = new Map(assignments), tile = { ...rawTile, arrowPattern };
 		if (allSharedEdgesMatch(board, tile, assignmentMap)) return { ...tile, resolvedArrowPatterns: Object.fromEntries(assignments) };
 	}
 	return null;
 }
 // 矢印無視配置後も、以後の候補判定に必要な矢印パターンは確定する。最多一致を採用する。
-function chooseArrowOverridePattern(board, rawTile) {
+function chooseArrowOverridePattern(board, rawTile, { allowVerticalArrowPattern = true } = {}) {
 	let best = null;
-	for (const pattern of arrowPatterns(rawTile.shape)) {
+	for (const pattern of (allowVerticalArrowPattern ? arrowPatterns(rawTile.shape) : ['normal'])) {
 		const tile = { ...rawTile, arrowPattern: pattern };
 		let matches = 0;
 		for (const edge of edgesFor(tile, board.side)) for (const { tile: otherTile, edge: other } of board.allEdges())
@@ -165,8 +166,8 @@ export function arrowsMatch(tile, edge, otherTile, otherEdge) {
 	const a = vector(vertices, one), b = vector(otherVertices, two), length = Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y);
 	return length > EPSILON && (a.x * b.x + a.y * b.y) / length > 1 - EPSILON;
 }
-export function isLegalPlacement(board, tile, { ignoreArrowMatching = false } = {}) {
-	const resolved = ignoreArrowMatching ? chooseArrowOverridePattern(board, tile) : (tile.arrowPattern ? tile : resolveArrowPatterns(board, tile));
+export function isLegalPlacement(board, tile, { ignoreArrowMatching = false, allowVerticalArrowPattern = true } = {}) {
+	const resolved = ignoreArrowMatching ? chooseArrowOverridePattern(board, tile, { allowVerticalArrowPattern }) : (tile.arrowPattern ? tile : resolveArrowPatterns(board, tile, { allowVerticalArrowPattern }));
 	if (!resolved || board.overlaps(tile)) return false;
 	let adjacent = false;
 	for (const edge of edgesFor(tile, board.side)) {

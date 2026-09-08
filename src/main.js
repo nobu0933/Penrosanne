@@ -51,6 +51,7 @@ const el = {
 	placementActions: document.querySelector('#placement-actions'),
 	theme: document.querySelector('#theme-select'),
 	deck: document.querySelector('#deck-select'),
+	arrowPatternMode: document.querySelector('#arrow-pattern-mode-select'),
 	startDeck: document.querySelector('#start-deck'),
 };
 for (const deck of DECK_CONFIGS) {
@@ -332,6 +333,7 @@ function render() {
 	renderPlacementActions();
 }
 function startSelectedDeck() {
+	gameRules.allowVerticalArrowPattern = el.arrowPatternMode.value === 'both';
 	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules });
 	provisional = null;
 	dragPreview = null;

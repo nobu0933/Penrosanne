@@ -69,6 +69,7 @@
     mirrorOnce: true,
     arrowOverride: true
   },
+  arrowPatternMode: "both", // "both"（通常・上下反転） | "normal-only"（通常のみ）
   drawMode: "random", // "random" | "choose-shape"
   playerCount: 2,
   cpu: { difficulty: "normal" },

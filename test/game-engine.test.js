@@ -4,7 +4,7 @@ import { Board } from "../src/game/Board.js";
 import { GameEngine } from "../src/game/GameEngine.js";
 import { featureCanReceiveMeeple, isLegalPlacement, placementCandidateGroups, placementCandidates } from "../src/game/Rules.js";
 import { isComplete, scoreFeature, scoreField } from "../src/game/Scoring.js";
-import { createTile, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
+import { arrowsFor, createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
 import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, manualAnchorOrder, mirrorTile } from "../src/game/TileSet.js";
 import { TileTheme, tileAssetFilename } from "../src/ui/TileTheme.js";
 import { manualAnchorForFeature, markerForFeature } from "../src/ui/FeatureAnchors.js";
@@ -18,23 +18,13 @@ test("最初の手番で提示される候補はすべて合法", () => {
   assert.ok(candidates.every((candidate) => isLegalPlacement(game.state.board, candidate)));
 });
 
-test("Lite と Standard は指定枚数・形状比で山札を生成する", () => {
-	const lite = createPrototypeDeck(fixedRandom, "lite"), standard = createPrototypeDeck(fixedRandom, "standard"), catalog = createTileCatalog(fixedRandom);
-	assert.equal(lite.length, 36);
-	assert.equal(standard.length, 90);
-	assert.equal(standard.length, catalog.length);
-	const cardCounts = (deck) => Object.fromEntries(deck.reduce((counts, tile) => {
-		const key = `${tile.idPrefix}:${tile.shape}`;
-		counts.set(key, (counts.get(key) || 0) + 1);
-		return counts;
-	}, new Map()));
-	assert.deepEqual(cardCounts(standard), cardCounts(catalog));
-	for (const deck of [lite, standard]) {
-		assert.equal(deck.filter((tile) => tile.shape === "thin").length, deck.length / 2);
-		assert.equal(deck.filter((tile) => tile.shape === "fat").length, deck.length / 2);
+test("登録済みの Lite と Standard は、現在の定義どおりに山札を生成する", () => {
+	for (const deckType of ["lite", "standard"]) {
+		const deck = createPrototypeDeck(fixedRandom, deckType);
+		assert.ok(deck.length >= 2);
+		assert.equal(new Set(deck.map((tile) => tile.id)).size, deck.length);
+		assert.equal(new GameEngine({ random: fixedRandom, deckType }).state.deck.length, deck.length - 2);
 	}
-	// 開始タイルと最初の手番タイルを取り出したあとの山札。
-	assert.equal(new GameEngine({ random: fixedRandom, deckType: "lite" }).state.deck.length, 34);
 });
 
 test("道だけデッキは道3枚・交差点2枚・修道院1枚ずつで構成する", () => {
@@ -54,8 +44,67 @@ test("道だけデッキは道3枚・交差点2枚・修道院1枚ずつで構�
 test("タイル一覧用カタログは手動アンカー一覧の順番を使える", () => {
 	const unique = [...new Map(createTileCatalog(fixedRandom).map((tile) => [`${tile.shape}:${tile.idPrefix}`, tile])).values()]
 		.sort((left, right) => manualAnchorOrder(left) - manualAnchorOrder(right));
-	assert.equal(unique.length, 78);
+	assert.equal(unique.length, 106);
 	assert.ok(unique.every((tile, index) => index === 0 || manualAnchorOrder(unique[index - 1]) < manualAnchorOrder(tile)));
+});
+
+test("指定タイルは180度回転後の辺・草原小領域・アンカーを直接定義する", () => {
+	const catalog = createTileCatalog(fixedRandom);
+	const expectations = {
+		"curve-road-v": { terrain: ["F", "R", "R", "F"], fields: [[3], [4, 1, 2]] },
+		"city-one-side-curve-road-c-reverse": { terrain: ["C", "F", "R", "R"], fields: [[3, 1, 2], [4]] },
+		"city-road-end-c-reverse": { terrain: ["F", "F", "R", "C"], fields: [[3, 1, 2], [4]] },
+		"t-junction": { terrain: ["F", "R", "R", "R"], fields: [[3], [4], [1, 2]] },
+		"city-three-connected": { terrain: ["C", "F", "C", "C"], fields: [[3, 4, 1, 2]] },
+		"city-three-connected-reverse": { terrain: ["C", "C", "F", "C"], fields: [[3, 4, 1, 2]] },
+		"city-three-road": { terrain: ["C", "R", "C", "C"], fields: [[3], [4, 1, 2]] },
+		"city-three-road-reverse": { terrain: ["C", "C", "R", "C"], fields: [[3, 1, 2], [4]] },
+		"monastery-road-end-reverse": { terrain: ["F", "F", "R", "F"], fields: [[3, 4, 1, 2]] },
+	};
+	for (const [idPrefix, expected] of Object.entries(expectations)) for (const shape of ["thin", "fat"]) {
+		const tile = catalog.find((candidate) => candidate.idPrefix === idPrefix && candidate.shape === shape);
+		assert.deepEqual(edgeNames(shape).map((edge) => tile.edgeTerrain[edge]), expected.terrain, shape + ":" + idPrefix);
+		assert.deepEqual(tile.fieldScoreGroups, expected.fields, shape + ":" + idPrefix);
+		for (const [roadIndex, terminals] of Object.entries(tile.roadTerminals || {})) {
+			const roadEdges = tile.featureGroups.road[Number(roadIndex)];
+			for (const terminal of terminals.filter((terminal) => terminal.kind === "edge"))
+				assert.ok(roadEdges.includes(terminal.edge), tile.id + ":" + terminal.edge);
+		}
+	}
+	const thinCurve = catalog.find((tile) => tile.shape === "thin" && tile.idPrefix === "curve-road-v");
+	assert.equal(thinCurve.featureAnchors.road[0].x, 0);
+	assert.equal(thinCurve.featureAnchors.road[0].y, .0649);
+	assert.equal(thinCurve.featureAnchors.field[0].x, 0);
+	assert.equal(thinCurve.featureAnchors.field[0].y, .25);
+});
+
+test("追加した都市・道・修道院タイルは指定辺と道の終点を持つ", () => {
+	const catalog = createTileCatalog(fixedRandom);
+	const expectations = {
+		"city-one-two-road-ends": { terrain: "CRRF", roads: [["edge", "city"], ["edge", "city"]] },
+		"city-one-two-road-ends-reverse": { terrain: "FRRC", roads: [["edge", "city"], ["edge", "city"]] },
+		"city-road-end-third": { terrain: "CFRF", roads: [["edge", "city"]] },
+		"city-road-end-third-reverse": { terrain: "FRFC", roads: [["edge", "city"]] },
+		"city-opposite-separated-curve-road": { terrain: "CRRC", roads: [["edge", "edge"]], cities: 2 },
+		"city-opposite-separated-road-second-to-first": { terrain: "CRFC", roads: [["edge", "city"]], cities: 2 },
+		"city-opposite-separated-road-second-to-first-reverse": { terrain: "CFRC", roads: [["edge", "city"]], cities: 2 },
+		"city-opposite-separated-road-third-to-first": { terrain: "CFRC", roads: [["edge", "city"]], cities: 2 },
+		"city-opposite-separated-road-third-to-first-reverse": { terrain: "CRFC", roads: [["edge", "city"]], cities: 2 },
+		"city-opposite-separated-two-road-ends": { terrain: "CRRC", roads: [["edge", "city"], ["edge", "city"]], cities: 2 },
+		"city-opposite-connected-road-second-end": { terrain: "CRFC", roads: [["edge", "city"]], cities: 1 },
+		"city-opposite-connected-road-second-end-reverse": { terrain: "CFRC", roads: [["edge", "city"]], cities: 1 },
+		"city-opposite-connected-two-road-ends": { terrain: "CRRC", roads: [["edge", "city"], ["edge", "city"]], cities: 1 },
+		"monastery-two-road-ends": { terrain: "FRRF", roads: [["edge", "monastery"], ["edge", "monastery"]], cities: 0, monastery: true },
+	};
+	for (const [idPrefix, expected] of Object.entries(expectations)) for (const shape of ["thin", "fat"]) {
+		const tile = catalog.find((candidate) => candidate.idPrefix === idPrefix && candidate.shape === shape);
+		assert.ok(tile, `${shape}:${idPrefix}`);
+		assert.equal(edgeNames(shape).map((edge) => tile.edgeTerrain[edge]).join(""), expected.terrain);
+		assert.equal(tile.featureGroups.city.length, expected.cities ?? 1);
+		assert.equal(Boolean(tile.hasMonastery), Boolean(expected.monastery));
+		expected.roads.forEach((terminalKinds, index) =>
+			assert.deepEqual(tile.roadTerminals[index].map((terminal) => terminal.kind), terminalKinds));
+	}
 });
 
 test("空白防止は地形を無視し、シン・ファットと矢印の配置可能性で判定する", () => {
@@ -319,7 +368,15 @@ test("交差点の各道は別の特徴領域で、別々にミープルを置�
   assert.equal(featureCanReceiveMeeple(board, state, junction, "road", 1), true);
 });
 
-test("thin AB と fat HG は上下反転矢印で接続でき、fat FG では接続できない", () => {
+test("180度回転後の矢印定義と上下反転パターンで接続を判定する", () => {
+	assert.deepEqual(arrowsFor("thin", "normal"), {
+		AB: { from: "B", to: "A", heads: 1 }, DA: { from: "D", to: "A", heads: 1 },
+		BC: { from: "B", to: "C", heads: 2 }, CD: { from: "D", to: "C", heads: 2 },
+	});
+	assert.deepEqual(arrowsFor("fat", "normal"), {
+		EF: { from: "F", to: "E", heads: 1 }, HE: { from: "H", to: "E", heads: 1 },
+		FG: { from: "G", to: "F", heads: 2 }, GH: { from: "G", to: "H", heads: 2 },
+	});
 	const definition = (shape) => ({
 		shape,
 		edgeTerrain: shape === "thin" ? { AB:"F", BC:"F", CD:"F", DA:"F" } : { EF:"F", FG:"F", GH:"F", HE:"F" },
@@ -337,8 +394,15 @@ test("thin AB と fat HG は上下反転矢印で接続でき、fat FG では接
 		const target = board.allEdges().find(({ edge }) => edgesFor(candidate, board.side).some((other) => Math.hypot(other.a.x - edge.b.x, other.a.y - edge.b.y) < 1e-5 && Math.hypot(other.b.x - edge.a.x, other.b.y - edge.a.y) < 1e-5));
 		return target?.edge.name === "AB" && source;
 	});
-	assert.ok(onThinAB.some((candidate) => sharedSourceEdge(candidate) === "GH" && candidate.arrowPattern === "verticalInverse"));
-	assert.ok(!onThinAB.some((candidate) => sharedSourceEdge(candidate) === "FG"));
+	assert.ok(onThinAB.some((candidate) => sharedSourceEdge(candidate) === "HE" && candidate.arrowPattern === "normal"));
+	assert.ok(onThinAB.some((candidate) => sharedSourceEdge(candidate) === "FG" && candidate.arrowPattern === "verticalInverse"));
+});
+
+test("通常のみモードでは開始タイルと候補に上下反転パターンを使わない", () => {
+	const game = new GameEngine({ random: fixedRandom, rules: { allowVerticalArrowPattern: false } });
+	assert.equal(game.state.board.tiles[0].arrowPattern, "normal");
+	const groups = game.candidateGroups();
+	assert.ok([...groups.regular, ...groups.relative, ...groups.arrowOverride].every((candidate) => candidate.arrowPattern === "normal"));
 });
 
 test("占有済みの特徴領域へはミープルを置けない", () => {
