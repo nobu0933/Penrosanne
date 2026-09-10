@@ -1,4 +1,4 @@
-import { createPrototypeDeck, createTileCatalog, manualAnchorOrder } from './game/TileSet.js';
+import { createPrototypeDeck, createTileCatalog, DECK_CONFIGS, manualAnchorOrder } from './game/TileSet.js';
 import { BoardView } from './ui/BoardView.js';
 import { TileTheme } from './ui/TileTheme.js';
 import {
@@ -10,6 +10,7 @@ import {
 const side = 96;
 const gallery = document.querySelector('#tile-gallery');
 const themeSelect = document.querySelector('#gallery-theme-select');
+const deckSelect = document.querySelector('#gallery-deck-select');
 const views = [];
 let renderQueued = false;
 const tileTheme = new TileTheme({
@@ -18,15 +19,36 @@ const tileTheme = new TileTheme({
 });
 const deckCounts = {
 	catalog: countsByDefinition(createTileCatalog(() => true)),
-	lite: countsByDefinition(createPrototypeDeck(() => true, 'lite')),
-	standard: countsByDefinition(createPrototypeDeck(() => true, 'standard')),
+	...Object.fromEntries(DECK_CONFIGS.map((deck) => [
+		deck.id,
+		countsByDefinition(createPrototypeDeck(() => true, deck.id)),
+	])),
 };
 
 const catalog = uniqueTiles(createTileCatalog(() => true))
 	.sort((left, right) => manualAnchorOrder(left) - manualAnchorOrder(right));
-
-for (const tile of catalog) addTileCard(tile);
+addDeckOptions();
+renderCatalog();
 themeSelect.addEventListener('change', (event) => tileTheme.setTheme(event.target.value));
+deckSelect.addEventListener('change', renderCatalog);
+
+function addDeckOptions() {
+	for (const deck of [{ id: 'catalog', label: '全タイル（CATALOG）' }, ...DECK_CONFIGS]) {
+		const option = document.createElement('option');
+		option.value = deck.id;
+		option.textContent = deck.label;
+		deckSelect.append(option);
+	}
+}
+
+function renderCatalog() {
+	const deckId = deckSelect.value || 'catalog';
+	gallery.replaceChildren();
+	views.splice(0);
+	for (const tile of catalog.filter((candidate) => deckId === 'catalog' || deckCount(candidate, deckId) > 0)) {
+		addTileCard(tile);
+	}
+}
 
 function queueRender() {
 	if (renderQueued) return;
@@ -98,19 +120,39 @@ function addTileCard(source) {
 		showVertices: () => true,
 		onFeatureSelect: () => {},
 		allowCameraControls: false,
+		// 一覧はアンカー確認用なので、差し替え可能なSVGをそのまま表示する。
+		preserveMeepleColor: true,
 		tileTheme,
 	});
 	view.candidatesVisible = false;
-	view.featureMarkers = featureMarkers(tile);
+	const markers = featureMarkers(tile);
+	// ホバー判定にはマーカーを残しつつ、表示は配置済みと同じミープルSVGに統一する。
+	view.featureMarkers = markers.map((marker) => ({ ...marker, hideIcon: true }));
+	// 一覧のミープルはゲーム盤面の状態とは別に保持する。以後 BoardView の
+	// 通常ミープル配列が更新されても、タイルごとのアンカー表示は失われない。
+	view.setStaticMeeples(markers.map((marker) => ({
+		x: marker.x,
+		y: marker.y,
+		option: marker.option,
+		playerIndex: marker.option.type === 'field' ? 1 : 0,
+		galleryMarker: true,
+		// 盤面と同じ基準サイズで位置を確認する。
+		displayScale: 1,
+	})));
 	view.render();
 	views.push(view);
 }
 
 function deckMembership(tile) {
 	const key = `${tile.shape}:${tile.idPrefix}`;
-	return ['catalog', 'lite', 'standard']
+	return ['catalog', ...DECK_CONFIGS.map((deck) => deck.id)]
 		.map((deck) => `${deck.toUpperCase()} ${deckCounts[deck].get(key) || 0}`)
 		.join(' / ');
+}
+
+function deckCount(tile, deckId) {
+	const key = `${tile.shape}:${tile.idPrefix}`;
+	return deckCounts[deckId]?.get(key) || 0;
 }
 
 function featureMarkers(tile) {

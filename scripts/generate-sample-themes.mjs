@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPrototypeDeck } from '../src/game/TileSet.js';
+import { createTileCatalog } from '../src/game/TileSet.js';
 import { edgeIndex, edgeVertexPairs, localVertices } from '../src/game/Tile.js';
 import { tileAssetFilename } from '../src/ui/TileTheme.js';
 
@@ -64,7 +64,9 @@ function layersFor(tile) {
 	];
 }
 
-const sourceTiles = createPrototypeDeck(() => .5);
+// 既存アセットを上書きせず、カタログにあるが未作成のレイヤーだけを補う。
+// 新規テーマの下絵をまとめて用意する用途にも使える。
+const sourceTiles = createTileCatalog(() => .5);
 for (const [themeId, colors] of Object.entries(themes)) {
 	const directory = join(root, 'assets', 'themes', themeId);
 	mkdirSync(directory, { recursive: true });

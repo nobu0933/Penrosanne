@@ -1,4 +1,4 @@
-import { arrowFor, edgeIndex, edgeVertexPairs, edgesFor, verticesFor } from '../game/Tile.js';
+import { edgeIndex, edgeVertexPairs, verticesFor } from '../game/Tile.js';
 import { loadMeepleImages, meepleKindForFeature, playerColor } from './MeepleAssets.js';
 
 const palette = {
@@ -24,12 +24,19 @@ export class BoardView {
 		this.previewTile = null;
 		this.featureMarkers = [];
 		this.meeples = [];
+		// タイル一覧など、ゲーム状態に属さない常設の表示用ミープル。
+		// `meeples` をゲーム画面の状態更新で差し替えても消えないよう分離する。
+		this.staticMeeples = [];
 		this.hoverMarker = null;
 		this.tileTheme = options.tileTheme || null;
 		this.meepleImages = loadMeepleImages(() => this.render());
 		this.tintedMeeples = new Map();
 		this.resize();
 		this.bind();
+	}
+	setStaticMeeples(meeples) {
+		this.staticMeeples = Array.isArray(meeples) ? meeples.map((meeple) => ({ ...meeple })) : [];
+		this.render();
 	}
 	resize() {
 		const rect = this.canvas.getBoundingClientRect(),
@@ -153,6 +160,8 @@ export class BoardView {
 		ctx.scale(this.camera.zoom, this.camera.zoom);
 		this.options.placed.forEach((tile) => this.drawTile(ctx, tile, false));
 		if (this.candidatesVisible)
+			(this.options.structuralCandidates || []).forEach((tile) => this.drawStructuralOutline(ctx, tile));
+		if (this.candidatesVisible)
 			this.options.candidates.forEach((tile) => this.drawTile(ctx, tile, true));
 		if (this.previewTile) this.drawTile(ctx, this.previewTile, true, true);
 		this.drawFeatureMarkers(ctx);
@@ -171,9 +180,7 @@ export class BoardView {
 	drawTile(ctx, tile, candidate, preview = false) {
 		const points = verticesFor(tile, this.options.side),
 			ids = Object.keys(points),
-			relative = candidate && tile._candidateKind === 'relative',
-			override = candidate && tile._candidateKind === 'override',
-			candidateColor = relative ? '#8c3f84' : override ? '#b96c12' : '#0c736d';
+			candidateColor = '#0c736d';
 		ctx.save();
 		ctx.beginPath();
 		ids.forEach((id, index) => {
@@ -182,9 +189,7 @@ export class BoardView {
 		});
 		ctx.closePath();
 		ctx.fillStyle = candidate
-			? (tile._candidateKey || tile.id) === this.selected
-				? relative ? 'rgba(140,63,132,.30)' : override ? 'rgba(185,108,18,.30)' : 'rgba(12,115,109,.26)'
-				: relative ? 'rgba(140,63,132,.13)' : override ? 'rgba(185,108,18,.13)' : 'rgba(12,115,109,.11)'
+			? (tile._candidateKey || tile.id) === this.selected ? 'rgba(12,115,109,.26)' : 'rgba(12,115,109,.11)'
 			: palette.field;
 		ctx.fill();
 		ctx.lineWidth = candidate ? 2 : 3;
@@ -196,13 +201,27 @@ export class BoardView {
 			this.drawFeatures(ctx, tile, points);
 			if (this.options.showVertices())
 				this.drawVertices(ctx, points);
-				if (tile.arrowPattern) this.drawArrows(ctx, tile);
 		} else {
 			ctx.fillStyle = candidateColor;
 			ctx.font = '11px DM Mono';
 			ctx.textAlign = 'center';
-			ctx.fillText(relative ? '相' : override ? '矢無' : tile.shape.toUpperCase(), tile.centerX, tile.centerY + 4);
+			ctx.fillText(tile.shape.toUpperCase(), tile.centerX, tile.centerY + 4);
 		}
+		ctx.restore();
+	}
+	drawStructuralOutline(ctx, tile) {
+		const points = verticesFor(tile, this.options.side), ids = Object.keys(points);
+		ctx.save();
+		ctx.beginPath();
+		ids.forEach((id, index) => {
+			const point = points[id];
+			index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
+		});
+		ctx.closePath();
+		ctx.strokeStyle = '#151515';
+		ctx.lineWidth = 2.2;
+		ctx.setLineDash([]);
+		ctx.stroke();
 		ctx.restore();
 	}
 	drawFeatures(ctx, tile, points) {
@@ -432,27 +451,9 @@ export class BoardView {
 			ctx.stroke();
 		});
 	}
-	drawArrows(ctx, tile) {
-		const vertices = verticesFor(tile, this.options.side);
-		for (const edge of edgesFor(tile, this.options.side)) {
-			const arrow = arrowFor(tile, edge.name), from = vertices[arrow.from], to = vertices[arrow.to];
-			const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy);
-			if (!length) continue;
-			const ux = dx / length, uy = dy / length, nx = -uy, ny = ux;
-			const start = { x: from.x + ux * 15, y: from.y + uy * 15 }, end = { x: to.x - ux * 15, y: to.y - uy * 15 };
-			ctx.save();
-			ctx.strokeStyle = '#273b35'; ctx.fillStyle = '#273b35'; ctx.lineWidth = 1.6;
-			ctx.beginPath(); ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); ctx.stroke();
-			for (let index = 0; index < arrow.heads; index++) {
-				const offset = index * 6;
-				const tip = { x: end.x - ux * offset, y: end.y - uy * offset };
-				ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.lineTo(tip.x - ux * 7 + nx * 4, tip.y - uy * 7 + ny * 4); ctx.lineTo(tip.x - ux * 7 - nx * 4, tip.y - uy * 7 - ny * 4); ctx.closePath(); ctx.fill();
-			}
-			ctx.restore();
-		}
-	}
 	drawFeatureMarkers(ctx) {
 		for (const marker of this.featureMarkers) {
+			if (marker.hideIcon) continue;
 			ctx.save();
 			const permanent = marker.option.type === 'field';
 			// 配置候補もミープルSVGだけを表示する。丸・四角の補助記号は使わない。
@@ -463,6 +464,12 @@ export class BoardView {
 	drawMeepleIcon(ctx, kind, x, y, width, height, color) {
 		const image = this.meepleImages[kind];
 		if (!image?.naturalWidth) return false;
+		if (this.options.preserveMeepleColor) {
+			ctx.save();
+			ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
+			ctx.restore();
+			return true;
+		}
 		const tinted = this.tintedMeeple(kind, color);
 		if (!tinted) return false;
 		ctx.save();
@@ -474,28 +481,29 @@ export class BoardView {
 		const image = this.meepleImages[kind], key = `${kind}:${color}`;
 		if (!image?.naturalWidth) return null;
 		if (this.tintedMeeples.has(key)) return this.tintedMeeples.get(key);
-		const width = image.naturalWidth, height = image.naturalHeight;
-		const canvas = typeof OffscreenCanvas !== 'undefined'
-			? new OffscreenCanvas(width, height)
-			: Object.assign(document.createElement('canvas'), { width, height });
+		const canvas = document.createElement('canvas');
+		canvas.width = image.naturalWidth;
+		canvas.height = image.naturalHeight;
 		const tint = canvas.getContext('2d');
-		tint.drawImage(image, 0, 0, width, height);
+		// 通常CanvasはSVGの透明マスクを維持する。OffscreenCanvasはキャッシュ済みSVGで
+		// 空のビットマップを返す環境があるため、ここでは使わない。
+		tint.drawImage(image, 0, 0, canvas.width, canvas.height);
 		tint.globalCompositeOperation = 'source-in';
 		tint.fillStyle = color;
-		tint.fillRect(0, 0, width, height);
+		tint.fillRect(0, 0, canvas.width, canvas.height);
 		this.tintedMeeples.set(key, canvas);
 		return canvas;
 	}
 	drawMeeples(ctx) {
-		for (const meeple of this.meeples) {
+		for (const meeple of [...this.meeples, ...this.staticMeeples]) {
 			ctx.save();
 			const highlighted = meeple.playerIndex === this.highlightPlayerIndex;
 			const kind = meepleKindForFeature(meeple.option?.type);
 			const baseWidth = kind === 'lying' ? 28 : 18, baseHeight = kind === 'lying' ? 17 : 26;
-			const scale = highlighted ? 1.18 : 1, width = baseWidth * scale, height = baseHeight * scale;
-			if (highlighted) {
+			const scale = (highlighted ? 1.18 : 1) * (meeple.displayScale || 1), width = baseWidth * scale, height = baseHeight * scale;
+			if (highlighted || meeple.galleryMarker) {
 				ctx.shadowColor = '#0c736d';
-				ctx.shadowBlur = 8;
+				ctx.shadowBlur = meeple.galleryMarker ? 3 : 8;
 			}
 			this.drawMeepleIcon(ctx, kind, meeple.x, meeple.y, width, height, playerColor(meeple.playerIndex));
 			ctx.restore();

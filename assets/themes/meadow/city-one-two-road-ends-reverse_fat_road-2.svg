@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_道" data-name="道" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <style>
+      .cls-1 {
+        stroke: #736357;
+        stroke-width: 15px;
+      }
+
+      .cls-1, .cls-2 {
+        fill: none;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-2 {
+        stroke: #c7b299;
+        stroke-width: 10px;
+      }
+    </style>
+  </defs>
+  <path class="cls-1" d="M99.78,105.93c10.49,22.13,3.55,29.5.93,36.04-2.3,5.75-6.61,18.83-17.34,27.9"/>
+  <path class="cls-2" d="M99.78,105.93c10.49,22.13,3.55,29.5.93,36.04-2.3,5.75-6.61,18.83-17.34,27.9"/>
+</svg>

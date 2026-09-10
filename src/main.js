@@ -14,16 +14,13 @@ const palette = {
 	white: '#fffdf7',
 };
 // 開始前設定画面ができるまでの、ルールをまとめた暫定設定値。
-// false にすれば、3辺以上接続時の矢印無視候補を無効化できる。
 const gameRules = {
-	allowArrowOverride: true,
+	allowVerticalMatchingPattern: true,
 };
 const side = Math.round(window.innerHeight / 5);
 let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules });
 let showVertices = true,
 	candidates = [],
-	relativeCandidates = [],
-	arrowOverrideCandidates = [],
 	provisional = null,
 	dragPreview = null,
 	tileDragging = false,
@@ -51,7 +48,7 @@ const el = {
 	placementActions: document.querySelector('#placement-actions'),
 	theme: document.querySelector('#theme-select'),
 	deck: document.querySelector('#deck-select'),
-	arrowPatternMode: document.querySelector('#arrow-pattern-mode-select'),
+	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
 	startDeck: document.querySelector('#start-deck'),
 };
 for (const deck of DECK_CONFIGS) {
@@ -72,6 +69,7 @@ view = new BoardView(el.board, {
 	side,
 	placed: engine.state.board.tiles,
 	candidates: [],
+	structuralCandidates: [],
 	showVertices: () => showVertices,
 	onFeatureSelect: (marker) => placeMeeple(marker.option),
 	onPreviewDragStart: (event) => {
@@ -90,20 +88,12 @@ view = new BoardView(el.board, {
 });
 
 function displayCandidates() {
-	const groups = engine.candidateGroups();
-	return {
-		regular: groups.regular.map((tile, index) => ({ ...tile, _candidateKind: 'regular', _candidateKey: `regular:${tile.id}:${index}` })),
-		relative: groups.relative.map((tile, index) => ({ ...tile, _candidateKind: 'relative', _candidateKey: `relative:${tile.id}:${index}` })),
-		override: groups.arrowOverride.map((tile, index) => ({ ...tile, _candidateKind: 'override', _candidateKey: `override:${tile.id}:${index}` })),
-	};
+	return engine.candidates().map((tile, index) => ({ ...tile, _candidateKey: `regular:${tile.id}:${index}` }));
 }
 function refreshCandidates() {
-	const displayed = engine.state.phase === 'placeTile' ? displayCandidates() : { regular: [], relative: [], override: [] };
-	candidates = displayed.regular;
-	relativeCandidates = displayed.relative;
-	arrowOverrideCandidates = displayed.override;
+	candidates = engine.state.phase === 'placeTile' ? displayCandidates() : [];
 }
-function allCandidates() { return [...candidates, ...relativeCandidates, ...arrowOverrideCandidates]; }
+function allCandidates() { return candidates; }
 function drawTilePreview(tile) {
 	const ctx = el.current.getContext('2d');
 	ctx.clearRect(0, 0, 220, 180);
@@ -312,8 +302,7 @@ function render() {
 	drawTilePreview(handTile);
 	el.current.classList.toggle('hidden', Boolean(provisional) || state.phase !== 'placeTile');
 	el.redo.classList.toggle('hidden', !provisional);
-	const candidateGroups = engine.candidateGroups();
-	const noRegular = candidateGroups.regular.length === 0;
+	const noRegular = engine.candidates().length === 0;
 	el.redraw.disabled = state.phase !== 'placeTile' || (!noRegular && player.redrawUsed) || Boolean(provisional);
 	el.redraw.textContent = noRegular ? '↺ 通常候補なし：引き直し' : '↺ 引き直し（1回）';
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
@@ -322,6 +311,7 @@ function render() {
 	el.forceEnd.disabled = state.finished;
 	view.options.placed = state.board.tiles;
 	view.options.candidates = state.phase === 'placeTile' ? allCandidates() : [];
+	view.options.structuralCandidates = state.phase === 'placeTile' ? engine.structuralCandidates() : [];
 	view.candidatesVisible = true;
 	view.previewTile = provisional || dragPreview;
 	view.featureMarkers = meepleMarkers();
@@ -333,7 +323,7 @@ function render() {
 	renderPlacementActions();
 }
 function startSelectedDeck() {
-	gameRules.allowVerticalArrowPattern = el.arrowPatternMode.value === 'both';
+	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
 	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules });
 	provisional = null;
 	dragPreview = null;
@@ -426,13 +416,8 @@ el.rotate.onclick = () => {
 };
 el.confirm.onclick = () => {
 	if (!provisional) return;
-	const useRelativePlacement = provisional._candidateKind === 'relative';
-	const ignoreArrowMatching = provisional._candidateKind === 'override';
-	if (useRelativePlacement && !window.confirm('紫色の相対禁則配置は各プレイヤー1回だけです。配置しますか？')) return;
-	if (ignoreArrowMatching && !window.confirm('橙色の候補は矢印マッチングを無視します。配置しますか？')) return;
 	const { _candidateKey, ...placement } = provisional;
-	delete placement._candidateKind;
-	engine.placeTile(placement, { ignoreArrowMatching });
+	engine.placeTile(placement);
 	provisional = null;
 	dragPreview = null;
 	refreshCandidates();

@@ -39,60 +39,64 @@ const SCORE_FIELD_GROUPS = {
 	'city-road-end-v': [[1], [2, 3, 4]],
 	'city-road-end-v-reverse': [[1], [2, 3, 4]],
 	'city-one-two-road-ends': [
-		[1, 2],
-		[3, 4],
+		[1, 4],
+		[2],
+		[3],
 	],
 	'city-one-two-road-ends-reverse': [
-		[3, 4],
 		[1, 2],
+		[3],
+		[4],
 	],
 	'city-road-end-third': [
 		[1, 4],
 		[2, 3],
 	],
 	'city-road-end-third-reverse': [
-		[2, 3],
-		[1, 4],
+		[1, 2],
+		[3, 4],
 	],
 	'city-opposite-separated-curve-road': [
-		[1, 2],
-		[3, 4],
+		[1, 2, 4],
+		[3],
 	],
 	'city-opposite-separated-road-second-to-first': [
-		[1, 2],
-		[3, 4],
+		[1, 3, 4],
+		[2],
 	],
 	'city-opposite-separated-road-second-to-first-reverse': [
-		[3, 4],
-		[1, 2],
+		[1, 2, 3],
+		[4],
 	],
 	'city-opposite-separated-road-third-to-first': [
 		[1, 4],
 		[2, 3],
 	],
 	'city-opposite-separated-road-third-to-first-reverse': [
-		[2, 3],
-		[1, 4],
+		[1, 2],
+		[3, 4],
 	],
 	'city-opposite-separated-two-road-ends': [
-		[1, 2],
-		[3, 4],
+		[1, 3],
+		[2],
+		[4],
 	],
 	'city-opposite-connected-road-second-end': [
-		[1, 2],
-		[3, 4],
+		[1, 3, 4],
+		[2],
 	],
 	'city-opposite-connected-road-second-end-reverse': [
-		[3, 4],
-		[1, 2],
+		[1, 2, 3],
+		[4],
 	],
 	'city-opposite-connected-two-road-ends': [
-		[1, 2],
-		[3, 4],
+		[1, 3],
+		[2],
+		[4],
 	],
 	'monastery-two-road-ends': [
-		[1, 2],
-		[3, 4],
+		[1, 2, 4],
+		[3],
 	],
 	't-junction': [[3], [4], [1, 2]],
 	't-junction-reverse': [[1, 4], [2], [3]],
@@ -854,8 +858,9 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1997, 0.0649],
 			],
 			[
-				[-0.08, 0.2],
-				[0, -0.12],
+				[-0.14, -0.18],
+				[0.26, 0.15],
+				[-0.26, 0.15],
 			],
 		),
 	],
@@ -868,8 +873,9 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1234, 0.1699],
 			],
 			[
-				[-0.08, 0.4],
-				[0, -0.18],
+				[-0.12, -0.36],
+				[0.22, 0.3],
+				[-0.22, 0.3],
 			],
 		),
 	],
@@ -882,8 +888,9 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1997, 0.0649],
 			],
 			[
-				[0.08, -0.2],
-				[0, 0.12],
+				[0.14, 0.18],
+				[0.26, -0.15],
+				[-0.26, -0.15],
 			],
 		),
 	],
@@ -896,8 +903,9 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1234, 0.1699],
 			],
 			[
-				[0.08, -0.4],
-				[0, 0.18],
+				[0.12, 0.36],
+				[0.22, -0.3],
+				[-0.22, -0.3],
 			],
 		),
 	],
@@ -1098,7 +1106,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 			],
 			[
 				[0.1, 0.18],
-				[-0.1, -0.18],
+				[0.28, -0.02],
+				[-0.28, -0.02],
 			],
 		),
 	],
@@ -1115,7 +1124,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 			],
 			[
 				[0.08, 0.34],
-				[-0.08, -0.34],
+				[0.22, -0.04],
+				[-0.22, -0.04],
 			],
 		),
 	],
@@ -1173,7 +1183,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 			],
 			[
 				[0.1, 0.18],
-				[-0.1, -0.18],
+				[0.28, -0.02],
+				[-0.28, -0.02],
 			],
 		),
 	],
@@ -1187,7 +1198,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 			],
 			[
 				[0.08, 0.34],
-				[-0.08, -0.34],
+				[0.22, -0.04],
+				[-0.22, -0.04],
 			],
 		),
 	],
@@ -1200,8 +1212,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1997, 0.0649],
 			],
 			[
-				[0.2, -0.14],
-				[-0.2, 0.14],
+				[-0.18, -0.12],
+				[0, 0.26],
 			],
 			[[0, 0]],
 		),
@@ -1215,8 +1227,8 @@ const MANUAL_FEATURE_ANCHORS = new Map([
 				[-0.1234, 0.1699],
 			],
 			[
-				[0.16, -0.3],
-				[-0.16, 0.3],
+				[-0.14, -0.24],
+				[0, 0.36],
 			],
 			[[0, 0]],
 		),
@@ -1551,7 +1563,7 @@ const dataFor = (shape, kind) => {
 				featureGroups: {
 					city: [[first]],
 					road: [[second], [third]],
-					field: fields([[fourth], []]),
+					field: fields([[fourth], [], []]),
 				},
 				roadTerminals: {
 					0: [
@@ -1563,7 +1575,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'city', cityGroup: 0 },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [0] },
+				fieldCityAdjacency: { 0: [0], 1: [0], 2: [0] },
 			};
 		case 'city-one-two-road-ends-reverse':
 			return {
@@ -1571,7 +1583,7 @@ const dataFor = (shape, kind) => {
 				featureGroups: {
 					city: [[fourth]],
 					road: [[second], [third]],
-					field: fields([[first], []]),
+					field: fields([[first], [], []]),
 				},
 				roadTerminals: {
 					0: [
@@ -1583,7 +1595,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'city', cityGroup: 0 },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [0] },
+				fieldCityAdjacency: { 0: [0], 1: [0], 2: [0] },
 			};
 		case 'city-road-end-third':
 			return {
@@ -1623,7 +1635,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'edge', edge: third },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [1] },
+				fieldCityAdjacency: { 0: [0, 1], 1: [0, 1] },
 			};
 		case 'city-opposite-separated-road-second-to-first':
 			return {
@@ -1639,7 +1651,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'city', cityGroup: 0 },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [1] },
+				fieldCityAdjacency: { 0: [0, 1], 1: [0] },
 			};
 		case 'city-opposite-separated-road-second-to-first-reverse':
 			return {
@@ -1695,7 +1707,7 @@ const dataFor = (shape, kind) => {
 				featureGroups: {
 					city: [[first], [fourth]],
 					road: [[second], [third]],
-					field: fields([[], []]),
+					field: fields([[], [], []]),
 				},
 				roadTerminals: {
 					0: [
@@ -1707,7 +1719,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'city', cityGroup: 1 },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [1] },
+				fieldCityAdjacency: { 0: [0, 1], 1: [0], 2: [1] },
 			};
 		case 'city-opposite-connected-road-second-end':
 			return {
@@ -1739,7 +1751,7 @@ const dataFor = (shape, kind) => {
 				featureGroups: {
 					city: [[first, fourth]],
 					road: [[second], [third]],
-					field: fields([[], []]),
+					field: fields([[], [], []]),
 				},
 				roadTerminals: {
 					0: [
@@ -1751,7 +1763,7 @@ const dataFor = (shape, kind) => {
 						{ kind: 'city', cityGroup: 0 },
 					],
 				},
-				fieldCityAdjacency: { 0: [0], 1: [0] },
+				fieldCityAdjacency: { 0: [0], 1: [0], 2: [0] },
 			};
 		case 'monastery-two-road-ends':
 			return {
@@ -2320,61 +2332,87 @@ const STANDARD_DEFINITIONS = [
 
 // Lite は短時間用の36枚。シン／ファットを18枚ずつ含む、基本地形中心の構成。
 const LITE_DEFINITIONS = [
-	['straight-road', 1, 'thin'],
-	['straight-road', 1, 'fat'],
-	['straight-road-reverse', 1, 'thin'],
-	['straight-road-reverse', 1, 'fat'],
-	['curve-road-c', 1, 'thin'],
-	['curve-road-c', 1, 'fat'],
-	['curve-road-v', 1, 'thin'],
-	['curve-road-v', 1, 'fat'],
-	['city-one-side', 1, 'thin'],
-	['city-one-side', 1, 'fat'],
-	['city-one-side-reverse', 1, 'thin'],
-	['city-one-side-reverse', 1, 'fat'],
-	['city-road-end-c', 1, 'thin'],
-	['city-road-end-c', 1, 'fat'],
-	['city-road-end-v', 1, 'thin'],
-	['city-road-end-v', 1, 'fat'],
-	['t-junction', 1, 'thin'],
-	['t-junction', 1, 'fat'],
-	['city-four-connected', 1, 'thin'],
-	['city-four-connected', 1, 'fat'],
-	['city-three-connected', 1, 'thin'],
-	['city-three-connected', 1, 'fat'],
-	['city-opposite-connected', 1, 'thin'],
-	['city-opposite-connected', 1, 'fat'],
-	['city-adjacent-connected-c', 1, 'thin'],
-	['city-adjacent-connected-c', 1, 'fat'],
-	['city-adjacent-connected-v', 1, 'thin'],
-	['city-adjacent-connected-v', 1, 'fat'],
-	['city-one-t-junction', 1, 'thin'],
-	['city-one-t-junction', 1, 'fat'],
-	['cross-junction', 1, 'thin'],
-	['cross-junction', 1, 'fat'],
-	['monastery-field', 1, 'thin'],
-	['monastery-field', 1, 'fat'],
-	['monastery-road-end', 1, 'thin'],
-	['monastery-road-end', 1, 'fat'],
+	// ['curve-road-v', 3, 'thin'],
+	// ['curve-road-v', 3, 'fat'],
+	// ['city-one-side', 2, 'thin'],
+	// ['city-one-side', 2, 'fat'],
+	// ['city-one-side-reverse', 2, 'thin'],
+	// ['city-one-side-reverse', 2, 'fat'],
+	// ['city-one-side-curve-road-v', 2, 'thin'],
+	// ['city-one-side-curve-road-v', 2, 'fat'],
+	// ['city-one-side-curve-road-v-reverse', 2, 'thin'],
+	// ['city-one-side-curve-road-v-reverse', 2, 'fat'],
+	// ['city-road-end-c', 2, 'thin'],
+	// ['city-road-end-c', 2, 'fat'],
+	// ['city-road-end-c-reverse', 2, 'thin'],
+	// ['city-road-end-c-reverse', 2, 'fat'],
+	// ['city-adjacent-connected-v', 2, 'thin'],
+	// ['city-adjacent-connected-v', 2, 'fat'],
+	['city-adjacent-curve-road-v', 3, 'thin'],
+	['city-adjacent-curve-road-v', 5, 'fat'],
+	// ['city-adjacent-separated-v', 2, 'thin'],
+	// ['city-adjacent-separated-v', 2, 'fat'],
+	// ['monastery-field', 1, 'thin'],
+	// ['monastery-field', 1, 'fat'],
+	// ['monastery-road-end', 1, 'thin'],
+	// ['monastery-road-end', 1, 'fat'],
+	// ['monastery-road-end-reverse', 1, 'thin'],
+	// ['monastery-road-end-reverse', 1, 'fat'],
+	// ['city-road-end-c', 1, 'thin'],
+	// ['city-road-end-c', 1, 'fat'],
+	// ['city-road-end-c-reverse', 1, 'thin'],
+	// ['city-road-end-c-reverse', 1, 'fat'],
+	// ['city-road-end-v', 1, 'thin'],
+	// ['city-road-end-v', 1, 'fat'],
+	// ['city-road-end-v-reverse', 1, 'thin'],
+	// ['city-road-end-v-reverse', 1, 'fat'],
+	// ['city-one-two-road-ends', 1, 'thin'],
+	// ['city-one-two-road-ends', 1, 'fat'],
+	// ['city-one-two-road-ends-reverse', 1, 'thin'],
+	// ['city-one-two-road-ends-reverse', 1, 'fat'],
+	// ['city-road-end-third', 1, 'thin'],
+	// ['city-road-end-third', 1, 'fat'],
+	// ['city-road-end-third-reverse', 1, 'thin'],
+	// ['city-road-end-third-reverse', 1, 'fat'],
+	['city-opposite-separated-curve-road', 3, 'thin'],
+	['city-opposite-separated-curve-road', 5, 'fat'],
+	// ['city-opposite-separated-road-second-to-first', 1, 'thin'],
+	// ['city-opposite-separated-road-second-to-first', 1, 'fat'],
+	// ['city-opposite-separated-road-second-to-first-reverse', 1, 'thin'],
+	// ['city-opposite-separated-road-second-to-first-reverse', 1, 'fat'],
+	// ['city-opposite-separated-road-third-to-first', 1, 'thin'],
+	// ['city-opposite-separated-road-third-to-first', 1, 'fat'],
+	// ['city-opposite-separated-road-third-to-first-reverse', 1, 'thin'],
+	// ['city-opposite-separated-road-third-to-first-reverse', 1, 'fat'],
+	['city-opposite-separated-two-road-ends', 3, 'thin'],
+	['city-opposite-separated-two-road-ends', 5, 'fat'],
+	// ['city-opposite-connected-road-second-end', 1, 'thin'],
+	// ['city-opposite-connected-road-second-end', 1, 'fat'],
+	// ['city-opposite-connected-road-second-end-reverse', 1, 'thin'],
+	// ['city-opposite-connected-road-second-end-reverse', 1, 'fat'],
+	['city-opposite-connected-two-road-ends', 3, 'thin'],
+	['city-opposite-connected-two-road-ends', 5, 'fat'],
+	// ['monastery-two-road-ends', 1, 'thin'],
+	// ['monastery-two-road-ends', 1, 'fat'],
 ];
 
 // 道だけデッキ: 道系は各3枚、交差点は各2枚、修道院は各1枚。
 // どの種類もシン／ファットを同数含めるため、計42枚（各形状21枚）になる。
 const ROAD_ONLY_DEFINITIONS = [
 	['straight-road', 3, 'thin'],
-	['straight-road', 3, 'fat'],
+	['straight-road', 5, 'fat'],
 	['straight-road-reverse', 3, 'thin'],
-	['straight-road-reverse', 3, 'fat'],
+	['straight-road-reverse', 5, 'fat'],
 	['curve-road-c', 3, 'thin'],
-	['curve-road-c', 3, 'fat'],
+	['curve-road-c', 5, 'fat'],
 	['curve-road-v', 3, 'thin'],
-	['curve-road-v', 3, 'fat'],
+	['curve-road-v', 5, 'fat'],
 	['t-junction', 2, 'thin'],
-	['t-junction', 2, 'fat'],
+	['t-junction', 3, 'fat'],
 	['t-junction-reverse', 2, 'thin'],
-	['t-junction-reverse', 2, 'fat'],
+	['t-junction-reverse', 3, 'fat'],
 	['cross-junction', 2, 'thin'],
-	['cross-junction', 2, 'fat'],
+	['cross-junction', 3, 'fat'],
 	['monastery-field', 1, 'thin'],
 	['monastery-field', 1, 'fat'],
 	['monastery-road-end', 1, 'thin'],

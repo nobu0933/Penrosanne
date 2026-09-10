@@ -45,38 +45,53 @@ export function verticesFor(tile, side) {
 	);
 }
 
-// 矢印は地形とは独立した形状マッチング用の情報である。
-// `verticalInverse` は地形／カードを反転せず、矢印だけを上下反転する。
-const NORMAL_ARROWS = {
+// 辺記号は地形とは独立した形状マッチング用の情報である。
+// `verticalInverse` は地形／カードを反転せず、記号だけを上下反転する。
+const NORMAL_EDGE_MATCHES = {
 	thin: {
-		AB: { from: 'B', to: 'A', heads: 1 }, DA: { from: 'D', to: 'A', heads: 1 },
-		BC: { from: 'B', to: 'C', heads: 2 }, CD: { from: 'D', to: 'C', heads: 2 },
+		AB: 'beta-concave',
+		BC: 'alpha-concave',
+		CD: 'alpha-convex',
+		DA: 'beta-convex',
 	},
 	fat: {
-		EF: { from: 'F', to: 'E', heads: 1 }, HE: { from: 'H', to: 'E', heads: 1 },
-		FG: { from: 'G', to: 'F', heads: 2 }, GH: { from: 'G', to: 'H', heads: 2 },
+		EF: 'beta-concave',
+		FG: 'alpha-convex',
+		GH: 'alpha-concave',
+		HE: 'beta-convex',
 	},
 };
 
 const VERTICAL_SWAP = { thin: { A: 'C', C: 'A' }, fat: { E: 'G', G: 'E' } };
 const canonicalEdgeName = (shape, one, two) => edgeNames(shape).find((name) => name.includes(one) && name.includes(two));
+const MIRROR_EDGE_NAMES = {
+	thin: { AB: 'DA', BC: 'CD', CD: 'BC', DA: 'AB' },
+	fat: { EF: 'HE', FG: 'GH', GH: 'FG', HE: 'EF' },
+};
 
-export function arrowPatterns(shape) { return ['normal', 'verticalInverse']; }
+export function matchingPatterns(shape) { return ['normal', 'verticalInverse']; }
 
-export function arrowsFor(shape, pattern = 'normal') {
-	const normal = NORMAL_ARROWS[shape];
+export function edgeMatchesFor(shape, pattern = 'normal') {
+	const normal = NORMAL_EDGE_MATCHES[shape];
 	if (pattern !== 'verticalInverse') return structuredClone(normal);
 	const swap = VERTICAL_SWAP[shape];
 	const result = {};
-	for (const arrow of Object.values(normal)) {
-		const from = swap[arrow.from] || arrow.from, to = swap[arrow.to] || arrow.to;
-		result[canonicalEdgeName(shape, from, to)] = { from, to, heads: arrow.heads };
+	for (const [edgeName, symbol] of Object.entries(normal)) {
+		const [from, to] = edgeName;
+		result[canonicalEdgeName(shape, swap[from] || from, swap[to] || to)] = symbol;
 	}
 	return result;
 }
 
-export function arrowFor(tile, edgeName) {
-	return arrowsFor(tile.shape, tile.arrowPattern || 'normal')[edgeName];
+export function edgeMatchFor(tile, edgeName) {
+	const sourceEdge = tile.mirrored ? MIRROR_EDGE_NAMES[tile.shape][edgeName] : edgeName;
+	return edgeMatchesFor(tile.shape, tile.matchingPattern || 'normal')[sourceEdge];
+}
+
+export function edgeSymbolsMatch(one, two) {
+	const [oneFamily, onePolarity] = (one || '').split('-');
+	const [twoFamily, twoPolarity] = (two || '').split('-');
+	return Boolean(oneFamily && oneFamily === twoFamily && onePolarity !== twoPolarity);
 }
 
 export function edgeVertexPairs(shape) {
@@ -105,6 +120,6 @@ export function createTile(definition, id) {
   return {
     ...structuredClone(definition), id, centerX: 0, centerY: 0, rotation: 0,
 		// 開始タイルだけは null を取り得る。通常の山札タイルは候補生成で確定する。
-		arrowPattern: definition.arrowPattern ?? null,
+		matchingPattern: definition.matchingPattern ?? null,
   };
 }

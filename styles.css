@@ -256,14 +256,11 @@ hr {
 .white {
 	background: #fff;
 }
-.forbidden {
-	background: #8c3f84;
-}
 .regular {
 	background: #0c736d;
 }
-.arrow-override {
-	background: #b96c12;
+.confirmed {
+	background: #151515;
 }
 .board-frame {
 	height: calc(100vh - 170px);
