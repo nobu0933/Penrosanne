@@ -22,7 +22,8 @@
 | 拡張 | 草原ルール | オフ | 終局時の草原得点を有効化する。草原得点の詳細は別途確定する。 |
 | 追加 | 引き直し | オン | 各プレイヤーは対局中に1回だけ、未配置タイルを山札へ戻してシャッフルし、新しいタイルを引ける。 |
 | 追加 | タイル反転 | オン | 各プレイヤーは対局中に1回だけ、未配置タイルを左右反転できる。ミラー版は山札には含めない。 |
-| ルール | 辺記号パターン | `both` | 通常・上下反転の両方を判定するか、通常のみを判定するかを選ぶ。 |
+| ルール | 辺記号パターン | `both` | 通常・180度回転の両方を判定するか、通常のみを判定するかを選ぶ。 |
+| ルール | 地形パターン | `both` | カード輪郭・辺記号とは独立して、地形・特徴領域を180度回転した状態も判定するか、通常のみを判定するかを選ぶ。 |
 | 山札 | 引き方 | `random` | `random` はシン・ファットを含む山札から完全ランダムに1枚引く。`choose-shape` は、シン・ファットの候補を1枚ずつ提示し、片方を選ぶ。 |
 | ソロ | CPU難易度 | `normal` | `easy` / `normal` / `hard`。ソロモードのみ表示する。 |
 | マルチ | プレイ人数 | 2人 | オフライン／オンライン対戦で2〜4人から選ぶ。オンラインでは参加人数が満たされるまで開始できない。 |
@@ -63,7 +64,8 @@
   meeplesPerPlayer: 7,
   expansions: { monastery: false, fieldScoring: false },
   specialActions: { redrawOnce: true, mirrorOnce: true },
-  matchingPatternMode: "both", // "both"（通常・上下反転） | "normal-only"（通常のみ）
+  matchingPatternMode: "both", // "both"（通常・180度回転） | "normal-only"（通常のみ）
+  terrainPatternMode: "both", // 辺記号とは独立。地形・特徴領域の通常・180度回転を判定するか
   drawMode: "random", // "random" | "choose-shape"
   playerCount: 2,
   cpu: { difficulty: "normal" },

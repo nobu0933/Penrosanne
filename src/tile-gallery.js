@@ -1,4 +1,4 @@
-import { createPrototypeDeck, createTileCatalog, DECK_CONFIGS, manualAnchorOrder } from './game/TileSet.js';
+import { createPrototypeDeck, createTileCatalog, DECK_CONFIGS, manualAnchorOrder, manualFeatureAnchorsFor } from './game/TileSet.js';
 import { BoardView } from './ui/BoardView.js';
 import { TileTheme } from './ui/TileTheme.js';
 import {
@@ -11,8 +11,12 @@ const side = 96;
 const gallery = document.querySelector('#tile-gallery');
 const themeSelect = document.querySelector('#gallery-theme-select');
 const deckSelect = document.querySelector('#gallery-deck-select');
+const anchorEditToggle = document.querySelector('#anchor-edit-toggle');
+const copyAnchors = document.querySelector('#copy-anchor-definitions');
 const views = [];
+const anchorDrafts = new Map();
 let renderQueued = false;
+let anchorEditMode = false;
 const tileTheme = new TileTheme({
 	id: themeSelect.value,
 	onChange: queueRender,
@@ -29,8 +33,19 @@ const catalog = uniqueTiles(createTileCatalog(() => true))
 	.sort((left, right) => manualAnchorOrder(left) - manualAnchorOrder(right));
 addDeckOptions();
 renderCatalog();
-themeSelect.addEventListener('change', (event) => tileTheme.setTheme(event.target.value));
+themeSelect.addEventListener('change', (event) => {
+	tileTheme.setTheme(event.target.value);
+	renderCatalog();
+});
 deckSelect.addEventListener('change', renderCatalog);
+anchorEditToggle.addEventListener('change', (event) => {
+	anchorEditMode = event.target.checked;
+	views.forEach(({ view }) => {
+		view.canvas.classList.toggle('anchor-editing', anchorEditMode);
+		view.render();
+	});
+});
+copyAnchors.addEventListener('click', copyCurrentThemeAnchors);
 
 function addDeckOptions() {
 	for (const deck of [{ id: 'catalog', label: '全タイル（CATALOG）' }, ...DECK_CONFIGS]) {
@@ -55,7 +70,7 @@ function queueRender() {
 	renderQueued = true;
 	requestAnimationFrame(() => {
 		renderQueued = false;
-		views.forEach((view) => view.render());
+		views.forEach(({ view }) => view.render());
 	});
 }
 
@@ -82,6 +97,8 @@ function addTileCard(source) {
 	tile.centerX = 0;
 	tile.centerY = 0;
 	tile.rotation = 0;
+	tile.featureAnchors = anchorsForTile(tile);
+	tile._themeFeatureAnchors = structuredClone(tile.featureAnchors);
 	const card = document.createElement('article');
 	card.className = 'tile-debug-card';
 	const heading = document.createElement('header');
@@ -106,6 +123,7 @@ function addTileCard(source) {
 		const label = document.createElement('strong');
 		label.textContent = item.label;
 		const position = document.createElement('span');
+		position.dataset.anchorKey = item.key;
 		position.textContent = item.position;
 		row.append(label, position);
 		anchorList.append(row);
@@ -123,24 +141,14 @@ function addTileCard(source) {
 		// 一覧はアンカー確認用なので、差し替え可能なSVGをそのまま表示する。
 		preserveMeepleColor: true,
 		tileTheme,
+		anchorEditMode: () => anchorEditMode,
+		onFeatureDrag: (marker, world) => moveAnchor(tile, marker.option, world, view, anchorList),
 	});
 	view.candidatesVisible = false;
-	const markers = featureMarkers(tile);
-	// ホバー判定にはマーカーを残しつつ、表示は配置済みと同じミープルSVGに統一する。
-	view.featureMarkers = markers.map((marker) => ({ ...marker, hideIcon: true }));
-	// 一覧のミープルはゲーム盤面の状態とは別に保持する。以後 BoardView の
-	// 通常ミープル配列が更新されても、タイルごとのアンカー表示は失われない。
-	view.setStaticMeeples(markers.map((marker) => ({
-		x: marker.x,
-		y: marker.y,
-		option: marker.option,
-		playerIndex: marker.option.type === 'field' ? 1 : 0,
-		galleryMarker: true,
-		// 盤面と同じ基準サイズで位置を確認する。
-		displayScale: 1,
-	})));
+	view.canvas.classList.toggle('anchor-editing', anchorEditMode);
+	refreshTileMarkers(view, tile);
 	view.render();
-	views.push(view);
+	views.push({ view, tile, anchorList });
 }
 
 function deckMembership(tile) {
@@ -155,19 +163,110 @@ function deckCount(tile, deckId) {
 	return deckCounts[deckId]?.get(key) || 0;
 }
 
+function anchorThemeId() {
+	return themeSelect.value || 'none';
+}
+
+function anchorsForTile(tile) {
+	const theme = anchorThemeId(), key = `${tile.shape}:${tile.idPrefix}`;
+	if (!anchorDrafts.has(theme)) anchorDrafts.set(theme, new Map());
+	const drafts = anchorDrafts.get(theme);
+	if (!drafts.has(key)) drafts.set(key, manualFeatureAnchorsFor(tile.shape, tile.idPrefix, theme));
+	return structuredClone(drafts.get(key));
+}
+
+function moveAnchor(tile, option, world, view, anchorList) {
+	const relative = { x: world.x - tile.centerX, y: world.y - tile.centerY };
+	const cos = Math.cos(tile.rotation || 0), sin = Math.sin(tile.rotation || 0);
+	const anchor = {
+		x: (relative.x * cos + relative.y * sin) / side,
+		y: (-relative.x * sin + relative.y * cos) / side,
+	};
+	const anchors = anchorsForTile(tile);
+	anchors[option.type] ||= [];
+	anchors[option.type][option.index] = anchor;
+	anchorDrafts.get(anchorThemeId()).set(`${tile.shape}:${tile.idPrefix}`, structuredClone(anchors));
+	tile.featureAnchors = structuredClone(anchors);
+	tile._themeFeatureAnchors = structuredClone(anchors);
+	refreshTileMarkers(view, tile);
+	updateAnchorRows(tile, anchorList);
+}
+
+function refreshTileMarkers(view, tile) {
+	const markers = featureMarkers(tile);
+	// ホバー判定にはマーカーを残しつつ、表示は配置済みと同じミープルSVGに統一する。
+	view.featureMarkers = markers.map((marker) => ({ ...marker, hideIcon: true }));
+	// 一覧のミープルはゲーム盤面の状態とは別に保持する。以後 BoardView の
+	// 通常ミープル配列が更新されても、タイルごとのアンカー表示は失われない。
+	view.staticMeeples = markers.map((marker) => ({
+		x: marker.x,
+		y: marker.y,
+		option: marker.option,
+		playerIndex: marker.option.type === 'field' ? 1 : 0,
+		galleryMarker: true,
+		displayScale: 1,
+	}));
+}
+
+function updateAnchorRows(tile, anchorList) {
+	for (const item of anchorRows(tile)) {
+		const value = anchorList.querySelector(`[data-anchor-key="${item.key}"]`);
+		if (value) value.textContent = item.position;
+	}
+}
+
+async function copyCurrentThemeAnchors() {
+	const theme = anchorThemeId();
+	const text = serializeThemeAnchors(theme);
+	try {
+		if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+		await navigator.clipboard.writeText(text);
+		showCopyResult('✓ 現在のテーマの全アンカーをコピーしました');
+	} catch {
+		const textarea = document.createElement('textarea');
+		textarea.value = text;
+		textarea.style.position = 'fixed';
+		textarea.style.opacity = '0';
+		document.body.append(textarea);
+		textarea.select();
+		document.execCommand('copy');
+		textarea.remove();
+		showCopyResult('✓ 現在のテーマの全アンカーをコピーしました');
+	}
+}
+
+function serializeThemeAnchors(theme) {
+	const lines = catalog.map((source) => {
+		const tile = { ...source, featureAnchors: anchorsForTile(source) };
+		const anchors = tile.featureAnchors;
+		return `\t['${tile.shape}:${tile.idPrefix}', A(${formatAnchorList(anchors.city)}, ${formatAnchorList(anchors.road)}, ${formatAnchorList(anchors.field)}, ${formatAnchorList(anchors.monastery)})],`;
+	});
+	return `// MANUAL_FEATURE_ANCHORS の '${theme}' エントリーへ貼り付け\n['${theme}', new Map([\n${lines.join('\n')}\n])]`;
+}
+
+function formatAnchorList(anchors = []) {
+	return `[${anchors.map((anchor) => `[${format(anchor.x)}, ${format(anchor.y)}]`).join(', ')}]`;
+}
+
+function showCopyResult(message) {
+	const initial = copyAnchors.textContent;
+	copyAnchors.textContent = message;
+	setTimeout(() => { copyAnchors.textContent = initial; }, 1800);
+}
+
 function featureMarkers(tile) {
 	const markers = [];
 	for (const type of ['city', 'road', 'field']) {
 		for (let index = 0; index < (tile.featureGroups?.[type] || []).length; index++) {
 			markers.push({
-				...markerForFeature(tile, { type, index }, side),
+				...markerForFeature(tile, { type, index }, side, anchorThemeId()),
 				component: { type, scoreFields: type === 'field', features: [{ tile, index }] },
 			});
 		}
 	}
 	if (tile.hasMonastery) {
 		markers.push({
-			...markerForFeature(tile, { type: 'monastery', index: 0 }, side),
+			...markerForFeature(tile, { type: 'monastery', index: 0 }, side, anchorThemeId()),
 			component: { type: 'monastery', features: [{ tile, index: 0 }] },
 		});
 	}
@@ -178,18 +277,19 @@ function anchorRows(tile) {
 	const rows = [];
 	for (const type of ['city', 'road', 'field']) {
 		for (let index = 0; index < (tile.featureGroups?.[type] || []).length; index++) {
-			const manual = manualAnchorForFeature(tile, type, index);
-			const marker = markerForFeature(tile, { type, index }, side);
+			const manual = manualAnchorForFeature(tile, type, index, anchorThemeId());
+			const marker = markerForFeature(tile, { type, index }, side, anchorThemeId());
 			const suffix = type === 'field'
 				? `小領域 ${tile.fieldScoreGroups?.[index]?.map((region) => `①②③④`[region - 1]).join('') || 'なし'}`
 				: `辺 ${featureEdgeNumbers(tile, type, index).join('・') || 'なし'}`;
 			rows.push({
+				key: `${type}:${index}`,
 				label: `${featureName(type)} ${index + 1}（${suffix}）`,
 				position: anchorPosition(manual, marker),
 			});
 		}
 	}
-	if (tile.hasMonastery) rows.push({ label: '修道院', position: '固定：x 0.000 / y 0.000' });
+	if (tile.hasMonastery) rows.push({ key: 'monastery:0', label: '修道院', position: anchorPosition(manualAnchorForFeature(tile, 'monastery', 0, anchorThemeId()), markerForFeature(tile, { type: 'monastery', index: 0 }, side, anchorThemeId())) });
 	return rows;
 }
 

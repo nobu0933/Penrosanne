@@ -1,11 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg id="_草原" data-name="草原" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<svg id="_道" data-name="道" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
   <defs>
     <style>
       .cls-1 {
-        fill: #8cc63f;
+        stroke: #736357;
+        stroke-width: 15px;
+      }
+
+      .cls-1, .cls-2 {
+        fill: none;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-2 {
+        stroke: #c7b299;
+        stroke-width: 10px;
       }
     </style>
   </defs>
-  <path class="cls-1" d="M113.5,129.52c4.2-17.65-32.24-13.81-37.95-32.16l44.45-14.44,114.13,37.08-114.13,37.08-56.65-18.41c6.11-8.84,46.98,4.19,50.15-9.16Z"/>
+  <path class="cls-1" d="M75.52,97.28c5.62,18.45,42.19,14.57,37.98,32.24-3.26,13.7-46.23-.4-50.57,9.9"/>
+  <path class="cls-2" d="M75.52,97.28c5.62,18.45,42.19,14.57,37.98,32.24-3.26,13.7-46.23-.4-50.57,9.9"/>
 </svg>

@@ -21,7 +21,7 @@
 					<div>
 						<p class="eyebrow">DEBUG TILE CATALOG</p>
 						<h1 id="gallery-heading">タイル一覧</h1>
-						<p class="small-note">各アンカーには、配置時と同じ直立／寝そべりミープルを表示します。アンカーへカーソルを合わせると、ゲーム画面と同じ領域だけを着色します。ドラッグやクリックでゲーム状態は変わりません。</p>
+						<p class="small-note">各アンカーには、配置時と同じ直立／寝そべりミープルを表示します。アンカーへカーソルを合わせると、ゲーム画面と同じ領域だけを着色します。位置調整モードではミープルをドラッグして、現在のテーマ用アンカーを一時調整できます。</p>
 					</div>
 					<label class="gallery-theme-label">タイルテーマ
 						<select id="gallery-theme-select">
@@ -33,10 +33,14 @@
 					<label class="gallery-theme-label">表示するデッキ
 						<select id="gallery-deck-select" aria-label="表示するデッキ"></select>
 					</label>
+					<div class="gallery-anchor-tools">
+						<label class="anchor-edit-toggle"><input id="anchor-edit-toggle" type="checkbox" /> アンカー位置を調整</label>
+						<button id="copy-anchor-definitions" type="button">現在テーマの全アンカーをコピー</button>
+					</div>
 				</div>
 				<div id="tile-gallery" class="tile-gallery" aria-live="polite"></div>
 			</section>
 		</main>
-		<script type="module" src="src/tile-gallery.js?v=meeple-markers-5"></script>
+		<script type="module" src="src/tile-gallery.js?v=anchor-editor-1"></script>
 	</body>
 </html>

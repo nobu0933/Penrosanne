@@ -1,5 +1,5 @@
 import { Board } from './Board.js';
-import { edgeMatchFor, edgeMatchesFor, edgeNames, edgeSymbolsMatch, edgeVertexPairs, edgesFor, localVertices, matchingPatterns, verticesFor } from './Tile.js';
+import { edgeMatchFor, edgeMatchesFor, edgeNames, edgeSymbolsMatch, edgeVertexPairs, edgesFor, halfTurnTerrainTile, localVertices, matchingPatterns, verticesFor } from './Tile.js';
 
 const EPSILON = 1e-5;
 const samePoint = (a, b) => Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON;
@@ -31,8 +31,8 @@ const FORCED_VERTEX_TYPE_HINTS = new Map([
 ]);
 
 // 地形、辺記号、頂点型、絶対禁則をすべて満たす通常候補だけを返す。
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true } = {}) {
-	const options = { allowVerticalMatchingPattern };
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true } = {}) {
+	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn };
 	const candidates = matchingPlacementCandidates(board, rawTile, targets, options);
 	if (!tileOptions.length && !fillabilityCache) return candidates;
 	return candidates.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
@@ -47,132 +47,69 @@ export function placementCandidateGroups(board, rawTile, options = {}) {
 // 配置位置を増分探索する。返すタイルは仮想タイルであり、ゲーム盤面には追加しない。
 export function structuralPlacementFrontier(
 	board,
-	{ tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true } = {},
+	{ tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, previous = null, changedTile = null, changedTileAlreadyVirtual = false } = {},
 ) {
 	const structuralOptions = structuralTileOptions(tileOptions);
 	if (!structuralOptions.length) return emptyPlacementFrontier();
 
-	const virtual = cloneBoard(board);
-	let physicalCache = fillabilityCache ? new Map(fillabilityCache) : createFillabilityCache(virtual, structuralOptions);
-	const domains = new Map();
-	const domainBuckets = new Map();
-	const queued = new Map();
-	// 辺の候補更新とは別に、頂点型が確定した地点からも再探索を始める。
-	// ある確定タイルが「辺を共有せず頂点だけを共有する」別の頂点型を
-	// 一意にする場合があるため、辺の近傍キャッシュだけでは連鎖を取りこぼす。
+	const resume = Boolean(previous?.virtualTiles?.length);
+	const virtual = resume ? boardFromTiles(board.side, previous.virtualTiles) : cloneBoard(board);
+	let changedVirtualTile = null;
+	if (resume && changedTile && !changedTileAlreadyVirtual) {
+		virtual.add(changedTile);
+		changedVirtualTile = virtual.getTile(changedTile.id);
+	}
 	const queuedVertices = new Map();
-	const forced = [];
-	const forcedKeys = new Set();
-	const vertexTypes = new Map();
-	let serial = 0;
+	const forced = resume ? structuredClone(previous.forced || []) : [];
+	const forcedKeys = new Set(forced.map(structuralPositionKey));
+	const vertexTypes = new Map(resume ? previous.vertexTypes || [] : []);
+	// `virtualTiles` を新規盤面として再探索する場合も、既存の仮想タイルと
+	// ID が衝突しない連番から始める。衝突すると Board#getTile が古いタイルを
+	// 返し、実際には追加できていない位置を確定配置として扱ってしまう。
+	let serial = resume ? previous.nextSerial || forced.length : nextStructuralSerial(virtual.tiles);
 
-	const enqueue = (item) => {
-		if (!item?.tile || !item?.edge || virtual.edgeNeighbors(item.tile, item.edge).length) return;
-		queued.set(freeEdgeKey(item.edge), item);
-	};
 	const enqueueVertex = (point) => {
 		const key = point && vertexKey(point);
-		if (key && vertexTypes.has(key)) queuedVertices.set(key, point);
+		if (!key) return;
+		queuedVertices.set(key, point);
 	};
-	const enqueueVertexEdges = (point) => {
-		// 頂点の空き扇形を埋めるタイルは、必ずこの頂点を端に持つ既存の
-		// 空き辺のいずれかを共有する。中心距離ではなく、幾何学的に正確な
-		// この2辺だけを再評価するため、探索範囲は頂点近傍に留まる。
-		for (const tile of virtual.vertexTiles(point)) for (const edge of virtual.edges(tile)) {
-			if (samePoint(edge.a, point) || samePoint(edge.b, point)) enqueue({ tile, edge });
-		}
-	};
-	const dropDomain = (key) => {
-		const previous = domains.get(key);
-		if (!previous) return;
-		domains.delete(key);
-		const bucket = previous.bucket;
-		const keys = domainBuckets.get(bucket);
-		keys?.delete(key);
-		if (!keys?.size) domainBuckets.delete(bucket);
-	};
-	const storeDomain = (target, candidates) => {
-		const key = freeEdgeKey(target.edge);
-		dropDomain(key);
-		const bucket = edgeBucket(target.edge, board.side);
-		domains.set(key, { target, candidates, bucket });
-		if (!domainBuckets.has(bucket)) domainBuckets.set(bucket, new Set());
-		domainBuckets.get(bucket).add(key);
-	};
-	const enqueueAffectedDomains = (tile) => {
-		for (const key of nearbyDomainKeys(domainBuckets, tile, board.side)) {
-			const domain = domains.get(key);
-			if (domain) enqueue(domain.target);
-		}
-	};
-	for (const point of rememberVertexTypes(virtual, vertexTypes)) enqueueVertex(point);
 
-	for (const freeEdge of virtual.freeEdges()) {
-		// 前ターンの domainCache は、前ターンだけ存在した仮想確定タイルを
-		// 前提に作られている。実盤面にはそのタイルがないため、遠方であっても
-		// 次ターンへ持ち越すと候補が欠落する。ここでは実盤面の全空き辺から
-		// 正しく再構築し、同一探索中だけ domains を増分更新する。
-		enqueue(freeEdge);
+	// 事前探索は辺記号・地形・絶対禁則を一切参照しない。ルール3の頂点型だけを
+	// 使い、実タイルが増えた頂点から確定タイルを連鎖させる。
+	if (!resume) for (const tile of virtual.tiles) for (const point of Object.values(verticesFor(tile, virtual.side))) enqueueVertex(point);
+	if (changedVirtualTile) {
+		for (const point of Object.values(verticesFor(changedVirtualTile, virtual.side))) enqueueVertex(point);
 	}
-	while (queued.size || queuedVertices.size) {
-		if (queuedVertices.size) {
-			const [, point] = queuedVertices.entries().next().value;
-			queuedVertices.delete(vertexKey(point));
-			enqueueVertexEdges(point);
-			continue;
-		}
-		const [key, target] = queued.entries().next().value;
-		queued.delete(key);
-		if (virtual.edgeNeighbors(target.tile, target.edge).length) {
-			dropDomain(key);
-			continue;
-		}
-		const candidates = structuralCandidatesAtEdge(virtual, target, structuralOptions, {
-			allowVerticalMatchingPattern,
-			fillabilityCache: physicalCache,
-			vertexTypes,
-		});
-		storeDomain(target, candidates);
-		// 残り1スロットの頂点型は、まず不足している頂点名そのものを満たす
-		// 候補で確定する。例えば FDGB → ace → H、GBHF → ace → D は、
-		// 同じ空き辺のもう一方の頂点に関する候補があっても取りこぼさない。
-		const finalSlotForced = uniqueStructuralPositions(
-			candidates.filter((candidate) => completesFinalVertexSlot(virtual, candidate, vertexTypes)),
-		);
-		// 確定済み頂点型へ入る候補だけで一意性を判定する。空き辺の反対側へ
-		// 広がる無関係な候補があっても、頂点型の残りスロットは確定のままである。
-		const vertexForced = finalSlotForced.length ? finalSlotForced : uniqueStructuralPositions(
-			candidates.filter((candidate) => completesForcedVertex(virtual, candidate, vertexTypes)),
-		);
-		if (vertexForced.length !== 1) continue;
+	while (queuedVertices.size) {
+		const [, point] = queuedVertices.entries().next().value;
+		queuedVertices.delete(vertexKey(point));
+		const types = structuralVertexTypesAt(virtual, point);
+		if (types.length === 1) vertexTypes.set(vertexKey(point), types[0]);
+		else vertexTypes.delete(vertexKey(point));
+		if (!types.length) continue;
 
-		const forcedCandidate = { ...vertexForced[0], _inferenceStatus: 'forced' };
-		const forcedKey = structuralPlacementKey(forcedCandidate);
-		if (forcedKeys.has(forcedKey)) continue;
-		forcedKeys.add(forcedKey);
-		dropDomain(key);
-		const placed = commitVirtualTile(virtual, forcedCandidate, serial++);
-		const placedVertices = Object.values(verticesFor(placed, virtual.side));
-		for (const point of rememberVertexTypes(virtual, vertexTypes, placedVertices)) enqueueVertex(point);
-		// 既に型が決まっている頂点でも、隣接する確定タイルが増えれば
-		// 残りスロットの候補数が変わるため、必ず頂点起点で再評価する。
-		for (const point of placedVertices) enqueueVertex(point);
-		forced.push({ ...placed, _inferenceStatus: 'forced' });
-		physicalCache = updateFillabilityCache(virtual, placed, structuralOptions, physicalCache);
-		enqueueAffectedDomains(placed);
-		for (const edge of virtual.edges(placed)) enqueue({ tile: placed, edge });
+		for (const candidate of forcedVertexCompletionCandidates(virtual, point, types, structuralOptions)) {
+			const forcedKey = structuralPositionKey(candidate);
+			if (forcedKeys.has(forcedKey)) continue;
+			forcedKeys.add(forcedKey);
+			const placed = commitVirtualTile(virtual, { ...candidate, _inferenceStatus: 'forced' }, serial++);
+			forced.push({ ...placed, _inferenceStatus: 'forced' });
+			// 新しいタイルの4頂点だけを次の探索対象にする。既存盤面の全頂点を
+			// 走査し直さず、頂点を共有する別の型にもここから連鎖できる。
+			for (const placedPoint of Object.values(verticesFor(placed, virtual.side))) enqueueVertex(placedPoint);
+		}
 	}
-
-	const unresolved = uniqueStructuralCandidates(
-		[...domains.values()].flatMap(({ candidates }) => candidates).filter((candidate) => !forcedKeys.has(structuralPlacementKey(candidate))),
-	).map((candidate) => ({ ...candidate, _inferenceStatus: 'unresolved' }));
 	return {
 		forced,
-		unresolved,
-		all: [...forced, ...unresolved],
-		// 同一回の頂点・辺連鎖を増分更新するための内部候補。
-		// 仮想確定配置を前提にするので、次ターンへは再利用しない。
-		domainCache: new Map([...domains].map(([key, domain]) => [key, domain.candidates])),
+		unresolved: [],
+		all: forced,
+		// 仮想盤面自体も保持する。確定配置は次手番でも存在し続けるため、
+		// 非確定位置への実配置はこの盤面へ増分追加して局所探索する。
+		virtualTiles: structuredClone(virtual.tiles),
+		virtualFillabilityCache: new Map(),
+		vertexTypes: [...vertexTypes],
+		nextSerial: serial,
+		domainCache: new Map(),
 		truncated: false,
 	};
 }
@@ -188,6 +125,19 @@ function cloneBoard(board) {
 	result.tiles = structuredClone(board.tiles);
 	return result;
 }
+function boardFromTiles(side, tiles) {
+	const result = new Board(side);
+	result.tiles = structuredClone(tiles);
+	return result;
+}
+function nextStructuralSerial(tiles) {
+	let next = 0;
+	for (const tile of tiles) {
+		const match = /^__inferred-(\d+)-/.exec(tile.id || '');
+		if (match) next = Math.max(next, Number(match[1]) + 1);
+	}
+	return next;
+}
 function structuralTileOptions(tileOptions) {
 	const shapes = tileOptions.length ? [...new Set(tileOptions.map((tile) => tile.shape))] : ['thin', 'fat'];
 	return shapes.map((shape) => ({
@@ -202,53 +152,98 @@ function structuralTileOptions(tileOptions) {
 		isStructural: true,
 	}));
 }
-function structuralCandidatesAtEdge(board, target, options, { allowVerticalMatchingPattern, fillabilityCache, vertexTypes }) {
-	const candidates = [];
-	for (const option of options) {
-		for (const base of geometricPlacementCandidates(board, option, [target], { requireTerrain: false })) {
-			for (const resolved of resolveMatchingPatternOptions(board, base, { allowVerticalMatchingPattern, vertexTypes })) {
-				const candidate = { ...resolved, id: `__structure-${structuralPositionKey(resolved)}:${resolved.matchingPattern}` };
-				if (preservesAbsoluteFillability(board, candidate, options, fillabilityCache)) candidates.push(candidate);
-			}
+
+// 頂点型探索の優先順位。識別列は頂点列全体との完全一致ではなく、時計回りの
+// 連続部分として含まれれば確定する。たとえば HC は C を含むため star、
+// GBH は BH を含むため ace として扱う。4タイル列の BDGG / GGBD は型自体は
+// 曖昧でも、両方の完成形に共通するタイル位置があれば取り出す。
+const STRUCTURAL_VERTEX_TYPE_PRIORITIES = [
+	{ patterns: ['C'], types: ['star'] },
+	{ patterns: ['AA'], types: ['deuce'] },
+	{ patterns: ['FH'], types: ['star'] },
+	{ patterns: ['HF', 'BH', 'FD'], types: ['ace'] },
+	{ patterns: ['AEE', 'EEA', 'EAE'], types: ['jack'] },
+	// DGG / GGB は型そのものは一意にならないが、king / queen の両方に
+	// 共通するスロットを確定させられる。
+	{ patterns: ['DGG', 'GGB'], types: ['king', 'queen'] },
+	{ patterns: ['EEEE'], types: ['moon'] },
+	{ patterns: ['DGGG', 'GGGB'], types: ['king'] },
+	{ patterns: ['BDGB', 'DGBD', 'DGGB'], types: ['queen'] },
+];
+
+function structuralVertexTypesFor(sequence) {
+	for (const { patterns, types } of STRUCTURAL_VERTEX_TYPE_PRIORITIES) if (patterns.some((pattern) => sequence.includes(pattern))) return types;
+	return [];
+}
+
+// ひとつの頂点の周囲には、まだタイルで埋まっていない扇形が複数あり得る。
+// それらを無視して頂点記号を単純に連結すると、本来は空白を挟む D と G を
+// `DG` と誤認し、合法な候補を除外してしまう。確定探索は連続して接する
+// タイル列だけを識別列として使う。
+function structuralVertexTypesAt(board, point) {
+	const runs = contiguousVertexRunsAt(board, null, point);
+	for (const { patterns, types } of STRUCTURAL_VERTEX_TYPE_PRIORITIES) {
+		if (runs.some((sequence) => patterns.some((pattern) => sequence.includes(pattern)))) return types;
+	}
+	return [];
+}
+
+// 頂点型のすべての完成方法を局所的に列挙し、その全ケースに共通する位置だけを
+// 確定配置として返す。辺記号・地形・絶対禁則はここでは判定しない。
+function forcedVertexCompletionCandidates(board, point, types, options) {
+	const completionPaths = [];
+	for (const type of types) {
+		const pattern = VERTEX_PATTERNS[type];
+		const maxAdditionalTiles = pattern.length - board.vertexTiles(point).length;
+		if (maxAdditionalTiles < 1) continue;
+		collectVertexCompletionPaths(board, point, pattern, options, [], maxAdditionalTiles, completionPaths);
+	}
+	if (!completionPaths.length) return [];
+	const common = new Map(completionPaths[0].map((tile) => [structuralPositionKey(tile), tile]));
+	for (const path of completionPaths.slice(1)) {
+		const keys = new Set(path.map(structuralPositionKey));
+		for (const key of common.keys()) if (!keys.has(key)) common.delete(key);
+	}
+	return [...common.values()];
+}
+
+function collectVertexCompletionPaths(board, point, pattern, options, path, remaining, results) {
+	const entries = vertexSectorsAt(board, null, point);
+	if (entries.length === pattern.length) {
+		if (vertexPatternFitsEntries(entries, pattern)) results.push(path);
+		return;
+	}
+	if (remaining <= 0 || !vertexPatternFitsEntries(entries, pattern)) return;
+	const nextVertexIds = nextVertexIdsForPattern(entries, pattern);
+	for (const candidate of structuralVertexCandidates(board, point, pattern, options, nextVertexIds)) {
+		const next = boardWithTile(board, candidate);
+		collectVertexCompletionPaths(next, point, pattern, options, [...path, candidate], remaining - 1, results);
+	}
+}
+
+function structuralVertexCandidates(board, point, pattern, options, allowedVertexIds) {
+	const candidates = new Map();
+	for (const option of options) for (const vertexId of Object.keys(localVertices(option.shape, board.side))) {
+		if (!allowedVertexIds.has(vertexId)) continue;
+		const localVertex = localVertices(option.shape, board.side)[vertexId];
+		for (let step = 0; step < 20; step++) {
+			const rotation = step * Math.PI / 10;
+			const cos = Math.cos(rotation), sin = Math.sin(rotation);
+			const rotated = { x: localVertex.x * cos - localVertex.y * sin, y: localVertex.x * sin + localVertex.y * cos };
+			const candidate = {
+				...option,
+				id: `__vertex-${vertexId}-${step}`,
+				centerX: point.x - rotated.x,
+				centerY: point.y - rotated.y,
+				rotation,
+			};
+			if (board.overlaps(candidate) || !hasAdjacentEdge(board, candidate)) continue;
+			if (!vertexPatternsAllow(board, candidate)) continue;
+			if (!vertexPatternFitsEntries(vertexSectorsAt(board, candidate, point), pattern)) continue;
+			candidates.set(structuralPositionKey(candidate), candidate);
 		}
 	}
-	return uniqueStructuralCandidates(candidates);
-}
-function uniqueStructuralCandidates(candidates) {
-	const result = new Map();
-	for (const candidate of candidates) result.set(structuralPlacementKey(candidate), candidate);
-	return [...result.values()];
-}
-function uniqueStructuralPositions(candidates) {
-	const result = new Map();
-	for (const candidate of candidates) {
-		const key = structuralPositionKey(candidate);
-		const variants = result.get(key) || [];
-		variants.push(candidate);
-		result.set(key, variants);
-	}
-	return [...result.values()].map((variants) => mergeMatchingPatternVariants(variants));
-}
-function structuralPlacementKey(tile) { return `${structuralPositionKey(tile)}:${tile.matchingPattern || 'normal'}`; }
-function completesForcedVertex(board, candidate, vertexTypes) {
-	return Object.values(verticesFor(candidate, board.side)).some((point) => vertexTypeAt(board, point, vertexTypes));
-}
-function completesFinalVertexSlot(board, candidate, vertexTypes) {
-	for (const [vertexId, point] of Object.entries(verticesFor(candidate, board.side))) {
-		const type = vertexTypeAt(board, point, vertexTypes);
-		if (!type) continue;
-		const expected = nextVertexInCompletedPattern(vertexSequenceAt(board, null, point), VERTEX_PATTERNS[type]);
-		if (expected === vertexId) return true;
-	}
-	return false;
-}
-function nextVertexInCompletedPattern(sequence, pattern) {
-	if (sequence.length !== pattern.length - 1) return null;
-	const circular = pattern + pattern;
-	for (let start = 0; start < pattern.length; start++) {
-		if (circular.slice(start, start + sequence.length) === sequence) return circular[start + sequence.length];
-	}
-	return null;
+	return [...candidates.values()];
 }
 function commitVirtualTile(board, candidate, serial) {
 	applyResolvedMatchingPatternDomains(board, candidate);
@@ -256,25 +251,30 @@ function commitVirtualTile(board, candidate, serial) {
 	board.add(tile);
 	return board.getTile(tile.id);
 }
-function edgeBucket(edge, side) {
-	const x = (edge.a.x + edge.b.x) / 2, y = (edge.a.y + edge.b.y) / 2, size = side * 1.6;
-	return `${Math.floor(x / size)}:${Math.floor(y / size)}`;
-}
-function nearbyDomainKeys(buckets, tile, side) {
-	const size = side * 1.6, radius = 3, x = Math.floor(tile.centerX / size), y = Math.floor(tile.centerY / size), keys = new Set();
-	for (let dx = -radius; dx <= radius; dx++) for (let dy = -radius; dy <= radius; dy++) {
-		for (const key of buckets.get(`${x + dx}:${y + dy}`) || []) keys.add(key);
-	}
-	return keys;
-}
-
 function matchingPlacementCandidates(board, rawTile, targets, options) {
 	const results = new Map();
-	for (const base of terrainPlacementCandidates(board, rawTile, targets)) {
-		const candidate = resolveMatchingPatterns(board, base, options);
-		if (candidate) results.set(placementKey(candidate), candidate);
-	}
+	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn))
+		for (const base of terrainPlacementCandidates(board, terrainTile, targets)) {
+			const candidate = resolveMatchingPatterns(board, base, options);
+			if (candidate) results.set(placementKey(candidate), candidate);
+		}
 	return [...results.values()];
+}
+
+// 手札は通常向きの地形データを保持し、候補生成時だけ独立した地形パターンを
+// 展開する。辺記号の `matchingPattern` はここでは触らない。
+function terrainPatternVariants(rawTile, allowTerrainHalfTurn) {
+	const allowed = allowTerrainHalfTurn ? ['normal', 'halfTurn'] : ['normal'];
+	// `terrainPatternOptions` がない生のタイル定義は、開始前設定で許す全状態を
+	// 持つものとして扱う。配置済みのタイルをここへ渡す用途はない。
+	const requested = Array.isArray(rawTile.terrainPatternOptions)
+		? rawTile.terrainPatternOptions
+		: allowed;
+	const patterns = requested.filter((pattern) => allowed.includes(pattern));
+	return patterns.map((pattern) => {
+		if (pattern === 'halfTurn') return halfTurnTerrainTile(rawTile);
+		return { ...rawTile, terrainPattern: 'normal', terrainPatternOptions: ['normal'] };
+	});
 }
 
 function terrainPlacementCandidates(board, rawTile, targets) {
@@ -355,7 +355,9 @@ function freeEdgeKey(edge) {
 	const pointKey = (point) => `${Math.round(point.x / EPSILON)}:${Math.round(point.y / EPSILON)}`;
 	return [pointKey(edge.a), pointKey(edge.b)].sort().join('|');
 }
-function placementKey(tile) { return `${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(tile.rotation / EPSILON)}`; }
+function placementKey(tile) {
+	return `${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(tile.rotation / EPSILON)}:${tile.terrainPattern || 'normal'}`;
+}
 
 // ルール2: 隣接辺は alpha/beta が一致し、convex/concave が反対のときだけ接続できる。
 export function resolveMatchingPatterns(board, rawTile, { allowVerticalMatchingPattern = true, vertexTypes = null } = {}) {
@@ -397,6 +399,17 @@ function matchingPatternDomains(board, candidate, allowVerticalMatchingPattern) 
 		if (!patterns.length) return null;
 		domains.set(id, patterns);
 	}
+	const reduced = propagateMatchingDomains(domains, constraints, byId);
+	// 辺ごとの局所整合性だけでは、閉路上のパターン矛盾を検出できない。
+	// 例: 各辺だけを見ると候補があるが、全タイルへ同時に normal / 180度
+	// パターンを割り当てられない場合。候補表示には全体で少なくとも1通りの
+	// 割当が必要なので、ここで二値 CSP の充足可能性を確認する。
+	if (!reduced || !matchingDomainsSatisfiable(reduced, constraints, byId)) return null;
+	return Object.fromEntries([...reduced].map(([id, patterns]) => [id, patterns]));
+}
+
+function propagateMatchingDomains(initialDomains, constraints, byId) {
+	const domains = new Map([...initialDomains].map(([id, patterns]) => [id, [...patterns]]));
 	let changed = true;
 	while (changed) {
 		changed = false;
@@ -416,12 +429,35 @@ function matchingPatternDomains(board, candidate, allowVerticalMatchingPattern) 
 			domains.set(constraint.rightId, nextRight);
 		}
 	}
-	return Object.fromEntries([...domains].map(([id, patterns]) => [id, patterns]));
+	return domains;
+}
+
+function matchingDomainsSatisfiable(domains, constraints, byId) {
+	const reduced = propagateMatchingDomains(domains, constraints, byId);
+	if (!reduced) return false;
+	let selected = null;
+	for (const [id, patterns] of reduced) if (patterns.length > 1) {
+		// 接続数の多いタイルから確定すると、矛盾を早く検出できる。
+		const degree = constraints.filter((constraint) => constraint.leftId === id || constraint.rightId === id).length;
+		if (!selected || degree > selected.degree) selected = { id, patterns, degree };
+	}
+	if (!selected) return true;
+	return selected.patterns.some((pattern) => {
+		const branch = new Map([...reduced].map(([id, values]) => [id, id === selected.id ? [pattern] : [...values]]));
+		return matchingDomainsSatisfiable(branch, constraints, byId);
+	});
 }
 function matchingEdgeConstraints(tiles, side) {
-	const allEdges = tiles.flatMap((tile) => edgesFor(tile, side).map((edge) => ({ tile, edge }))), constraints = [];
-	for (let left = 0; left < allEdges.length; left++) for (let right = left + 1; right < allEdges.length; right++) {
-		const one = allEdges[left], two = allEdges[right];
+	// 全辺の総当たりではなく、正規化した辺座標で同じ辺だけをまとめる。
+	// 構造候補のたびに呼ばれるため、盤面が広がった時の O(E²) を避ける。
+	const byEdge = new Map(), constraints = [];
+	for (const tile of tiles) for (const edge of edgesFor(tile, side)) {
+		const key = freeEdgeKey(edge), entries = byEdge.get(key) || [];
+		entries.push({ tile, edge });
+		byEdge.set(key, entries);
+	}
+	for (const entries of byEdge.values()) for (let left = 0; left < entries.length; left++) for (let right = left + 1; right < entries.length; right++) {
+		const one = entries[left], two = entries[right];
 		if (one.tile.id === two.tile.id || !samePoint(one.edge.a, two.edge.b) || !samePoint(one.edge.b, two.edge.a)) continue;
 		constraints.push({ leftId: one.tile.id, leftEdge: one.edge.name, rightId: two.tile.id, rightEdge: two.edge.name });
 	}
@@ -488,8 +524,8 @@ function applyResolvedMatchingPatternDomains(board, tile) {
 // ルール3: 盤面頂点の時計回り配列は、許可された頂点型の循環連続部分列だけに制限する。
 export function vertexPatternsAllow(board, candidate) {
 	for (const point of Object.values(verticesFor(candidate, board.side))) {
-		const sequence = vertexSequenceAt(board, candidate, point);
-		if (!Object.values(VERTEX_PATTERNS).some((pattern) => isCyclicSegment(sequence, pattern))) return false;
+		const entries = vertexSectorsAt(board, candidate, point);
+		if (!Object.values(VERTEX_PATTERNS).some((pattern) => vertexPatternFitsEntries(entries, pattern))) return false;
 	}
 	return true;
 }
@@ -498,7 +534,7 @@ export function vertexPatternsAllow(board, candidate) {
 export function forcedVertexTypesAllow(board, candidate, assignedTypes = null) {
 	for (const point of Object.values(verticesFor(candidate, board.side))) {
 		const type = vertexTypeAt(board, point, assignedTypes);
-		if (type && !isCyclicSegment(vertexSequenceAt(board, candidate, point), VERTEX_PATTERNS[type])) return false;
+		if (type && !vertexPatternFitsEntries(vertexSectorsAt(board, candidate, point), VERTEX_PATTERNS[type])) return false;
 	}
 	return true;
 }
@@ -524,9 +560,11 @@ function rememberVertexTypes(board, assignedTypes, points = null) {
 }
 
 function inferVertexTypeAt(board, point) {
-	const preferred = forcedVertexTypeForSequence(vertexHintSequenceAt(board, point));
-	if (preferred) return preferred;
-	return inferredVertexTypeForSequence(vertexSequenceAt(board, null, point));
+	const entries = vertexSectorsAt(board, null, point);
+	const possible = Object.entries(VERTEX_PATTERNS)
+		.filter(([, pattern]) => vertexPatternFitsEntries(entries, pattern))
+		.map(([type]) => type);
+	return possible.length === 1 ? possible[0] : null;
 }
 
 export function inferredVertexTypeForSequence(sequence) {
@@ -546,38 +584,126 @@ function vertexKey(point) {
 
 // 部分的に埋まった頂点の識別列は、最大の空白角の直後から時計回りに読む。
 // 固定の画面角度を起点にすると FH と HF の向きが不安定になるためである。
-function vertexHintSequenceAt(board, point) {
-	return clockwiseVertexEntries(board, null, point).map(({ vertexId }) => vertexId).join('');
-}
-
 export function vertexSequenceAt(board, candidate, point) {
 	return clockwiseVertexEntries(board, candidate, point).map(({ vertexId }) => vertexId).join('');
 }
 
-// 部分的に埋まった頂点は、最大の空白角の直後から時計回りに読む。
-// `atan2` の -π/π 境界で単純にソートすると、例えば実際は H→F→D と
-// 連続している並びが D→H→F に分断され、ace の D/G/B が候補から漏れる。
-// 頂点型は循環順列なので、完成頂点についてこの起点を選んでも意味は変わらない。
-function clockwiseVertexEntries(board, candidate, point) {
+// 部分的に埋まった頂点は、最大の「未占有の扇形」の直後から時計回りに読む。
+// タイル中心どうしの角度差で空白を選ぶと、144度の A/C と36度の B/D の
+// 境界のように、実際には接している大きな扇形を空白と誤認してしまう。
+// 各頂点が占有する扇形の端を使うことで、DGGGG など混在した頂点型も
+// 一貫した順列として扱える。
+function vertexSectorsAt(board, candidate, point) {
 	const entries = [];
 	for (const tile of [...board.tiles, ...(candidate ? [candidate] : [])]) {
 		for (const [vertexId, vertex] of Object.entries(verticesFor(tile, board.side))) if (samePoint(vertex, point)) {
-			// 画面座標系では atan2 の昇順が時計回りになる。
-			entries.push({ vertexId, direction: Math.atan2(tile.centerY - point.y, tile.centerX - point.x) });
+			// 画面座標系では atan2 の昇順が時計回りになる。ひし形は各頂点で
+			// 中心方向が内角の二等分線なので、中心角±内角/2 が扇形境界になる。
+			const direction = Math.atan2(tile.centerY - point.y, tile.centerX - point.x);
+			const vertexAngle = vertexInteriorAngle(tile.shape, vertexId);
+			const start = normalizeAngle(direction - vertexAngle / 2);
+			entries.push({ vertexId, direction, start, end: start + vertexAngle });
 		}
 	}
+	entries.sort((left, right) => left.start - right.start);
+	return entries;
+}
+
+function clockwiseVertexEntries(board, candidate, point) {
+	const entries = vertexSectorsAt(board, candidate, point);
 	if (entries.length < 2) return entries;
-	entries.sort((left, right) => left.direction - right.direction);
 	let largestGap = -Infinity, start = 0;
 	for (let index = 0; index < entries.length; index++) {
-		const current = entries[index].direction;
-		const next = entries[(index + 1) % entries.length].direction + (index + 1 === entries.length ? Math.PI * 2 : 0);
-		if (next - current > largestGap) {
-			largestGap = next - current;
+		const currentEnd = entries[index].end;
+		const nextStart = entries[(index + 1) % entries.length].start + (index + 1 === entries.length ? Math.PI * 2 : 0);
+		if (nextStart - currentEnd > largestGap) {
+			largestGap = nextStart - currentEnd;
 			start = (index + 1) % entries.length;
 		}
 	}
 	return entries.slice(start).concat(entries.slice(0, start));
+}
+
+function contiguousVertexRunsAt(board, candidate, point) {
+	const entries = vertexSectorsAt(board, candidate, point);
+	if (!entries.length) return [];
+	const gaps = [];
+	for (let index = 0; index < entries.length; index++) {
+		const currentEnd = entries[index].end;
+		const nextStart = entries[(index + 1) % entries.length].start + (index + 1 === entries.length ? Math.PI * 2 : 0);
+		if (nextStart - currentEnd > EPSILON) gaps.push(index);
+	}
+	if (!gaps.length) return [entries.map(({ vertexId }) => vertexId).join('')];
+	return gaps.map((gapIndex) => {
+		const run = [];
+		for (let index = (gapIndex + 1) % entries.length; ; index = (index + 1) % entries.length) {
+			run.push(entries[index].vertexId);
+			if (gaps.includes(index)) break;
+		}
+		return run.join('');
+	});
+}
+
+// 頂点型と既存タイルの「角度上の配置」を照合する。
+// 頂点記号だけを並べる方式と違い、未配置の扇形を跨いで既存タイルを
+// 隣接扱いにしないため、離れた二つのタイルがある外周でも合法配置を
+// 取りこぼさない。
+function vertexPatternFitsEntries(entries, pattern) {
+	if (entries.length > pattern.length) return false;
+	if (!entries.length) return true;
+	return matchingPatternOffsets(entries, pattern).length > 0;
+}
+
+function nextVertexIdsForPattern(entries, pattern) {
+	const slots = vertexPatternSlots(pattern), ids = new Set();
+	for (const offset of matchingPatternOffsets(entries, pattern, slots)) for (const entry of entries) {
+		const index = matchingSlotIndex(entry, slots, offset);
+		if (index < 0) continue;
+		ids.add(slots[(index + 1) % slots.length].vertexId);
+		ids.add(slots[(index - 1 + slots.length) % slots.length].vertexId);
+	}
+	return ids;
+}
+
+function matchingPatternOffsets(entries, pattern, providedSlots = null) {
+	const slots = providedSlots || vertexPatternSlots(pattern), offsets = new Set();
+	for (const entry of entries) for (const anchor of slots) {
+		if (anchor.vertexId !== entry.vertexId) continue;
+		const offset = normalizeAngle(entry.start - anchor.start);
+		if (entries.every((current) => matchingSlotIndex(current, slots, offset) >= 0)) offsets.add(Math.round(offset / EPSILON));
+	}
+	return [...offsets].map((value) => value * EPSILON);
+}
+
+function matchingSlotIndex(entry, slots, offset) {
+	return slots.findIndex((slot) => slot.vertexId === entry.vertexId && sameAngle(entry.start, offset + slot.start));
+}
+
+function vertexPatternSlots(pattern) {
+	const slots = [];
+	let start = 0;
+	for (const vertexId of pattern) {
+		const width = vertexInteriorAngle(vertexId >= 'E' ? 'fat' : 'thin', vertexId);
+		slots.push({ vertexId, start, width });
+		start += width;
+	}
+	return slots;
+}
+
+function sameAngle(one, two) {
+	const full = Math.PI * 2;
+	const difference = ((one - two + Math.PI) % full + full) % full - Math.PI;
+	return Math.abs(difference) < EPSILON;
+}
+
+function normalizeAngle(value) {
+	const full = Math.PI * 2;
+	return ((value % full) + full) % full;
+}
+
+function vertexInteriorAngle(shape, vertexId) {
+	if (shape === 'thin') return (vertexId === 'A' || vertexId === 'C') ? Math.PI * 4 / 5 : Math.PI / 5;
+	return (vertexId === 'E' || vertexId === 'G') ? Math.PI * 2 / 5 : Math.PI * 3 / 5;
 }
 
 export function isCyclicSegment(sequence, pattern) {
@@ -589,11 +715,17 @@ export function isCyclicSegment(sequence, pattern) {
 
 export function edgeSymbolFor(shape, edgeName, matchingPattern = 'normal') { return edgeMatchesFor(shape, matchingPattern)[edgeName]; }
 
-export function isLegalPlacement(board, tile, { allowVerticalMatchingPattern = true } = {}) {
+export function isLegalPlacement(board, tile, { allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true } = {}) {
 	// 候補には未確定の周辺タイルへ採用するパターンも記録されるため、ここでも
 	// 改めて全組合せを解き直して検証する。
 	const resolved = resolveMatchingPatterns(board, tile, { allowVerticalMatchingPattern });
-	return Boolean(resolved && !board.overlaps(tile) && hasAdjacentEdge(board, tile));
+	return Boolean(
+		(allowTerrainHalfTurn || (tile.terrainPattern || 'normal') === 'normal')
+		&& resolved
+		&& !board.overlaps(tile)
+		&& hasAdjacentEdge(board, tile)
+		&& allSharedTerrainMatch(board, tile),
+	);
 }
 
 export function featureCanReceiveMeeple(board, state, tile, type, index) {

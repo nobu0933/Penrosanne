@@ -310,6 +310,10 @@ hr {
 	font-size: 1.05rem;
 	box-shadow: 0 3px 10px rgba(31, 37, 31, .22);
 }
+#rotate-terrain {
+	width: 48px;
+	font-size: 0.57rem;
+}
 .board-actions button {
 	font-size: 0.66rem;
 	padding: 0.62rem 0.8rem;
@@ -441,6 +445,20 @@ hr {
 	border: 1px solid var(--line);
 	padding: .42rem;
 }
+.gallery-anchor-tools {
+	display: grid;
+	gap: 8px;
+	font-size: .64rem;
+	color: #526159;
+	white-space: nowrap;
+}
+.anchor-edit-toggle { display: flex; align-items: center; gap: 6px; }
+.gallery-anchor-tools button {
+	font: inherit;
+	font-size: .61rem;
+	padding: .48rem .62rem;
+	white-space: normal;
+}
 .tile-gallery {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -469,6 +487,8 @@ hr {
 	display: block;
 	cursor: default;
 }
+.tile-debug-canvas.anchor-editing { cursor: grab; }
+.tile-debug-canvas.anchor-editing:active { cursor: grabbing; }
 .tile-anchor-list {
 	list-style: none;
 	margin: 0;
@@ -513,6 +533,7 @@ hr {
 	.topbar-link { margin-left: auto; margin-right: 0; }
 	.tile-gallery-toolbar { display: block; padding: 16px; }
 	.gallery-theme-label { margin-top: 14px; width: max-content; }
+	.gallery-anchor-tools { margin-top: 14px; width: max-content; }
 	.tile-gallery { grid-template-columns: 1fr; gap: 10px; }
 	.board-heading {
 		margin-top: 12px;

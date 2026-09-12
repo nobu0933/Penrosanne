@@ -1,8 +1,9 @@
 import { edgeIndex, edgesFor, verticesFor } from '../game/Tile.js';
+import { themedManualFeatureAnchorsFor } from '../game/TileSet.js';
 
-export function featureAnchor(tile, type, index, side) {
+export function featureAnchor(tile, type, index, side, themeId = null) {
 	const edges = edgesFor(tile, side), group = tile.featureGroups[type]?.[index], names = Array.isArray(group) ? group : group?.boundaryEdges || [];
-	const manualAnchor = manualAnchorForFeature(tile, type, index);
+	const manualAnchor = manualAnchorForFeature(tile, type, index, themeId);
 	if (manualAnchor) return transformAnchor(tile, manualAnchor, side);
 	if (!names.length) return { x: tile.centerX, y: tile.centerY };
 	const midpoints = names
@@ -18,10 +19,10 @@ export function featureAnchor(tile, type, index, side) {
 	};
 }
 
-export function fieldScoreAnchor(tile, index, side) {
-	if (manualAnchorForFeature(tile, 'field', index)) return featureAnchor(tile, 'field', index, side);
+export function fieldScoreAnchor(tile, index, side, themeId = null) {
+	if (manualAnchorForFeature(tile, 'field', index, themeId)) return featureAnchor(tile, 'field', index, side, themeId);
 	const points = Object.values(verticesFor(tile, side)), regions = tile.fieldScoreGroups[index] || [];
-	const blockers = ['city', 'road'].flatMap((type) => (tile.featureGroups[type] || []).map((_, featureIndex) => featureAnchor(tile, type, featureIndex, side)));
+	const blockers = ['city', 'road'].flatMap((type) => (tile.featureGroups[type] || []).map((_, featureIndex) => featureAnchor(tile, type, featureIndex, side, themeId)));
 	const candidates = regions.flatMap((region) => {
 		const regionIndex = region - 1, vertex = points[regionIndex], previous = points[(regionIndex + 3) % 4], next = points[(regionIndex + 1) % 4];
 		const previousMidpoint = midpoint(previous, vertex), nextMidpoint = midpoint(vertex, next);
@@ -37,17 +38,26 @@ export function fieldScoreAnchor(tile, index, side) {
 	});
 }
 
-export function markerForFeature(tile, option, side) {
-	if (option.type === 'monastery') return { ...featureAnchor(tile, 'monastery', option.index, side), option };
-	if (option.type === 'field' && tile.fieldScoreGroups?.[option.index]) return { ...fieldScoreAnchor(tile, option.index, side), option };
-	return { ...featureAnchor(tile, option.type, option.index, side), option };
+export function markerForFeature(tile, option, side, themeId = null) {
+	if (option.type === 'monastery') return { ...featureAnchor(tile, 'monastery', option.index, side, themeId), option };
+	if (option.type === 'field' && tile.fieldScoreGroups?.[option.index]) return { ...fieldScoreAnchor(tile, option.index, side, themeId), option };
+	return { ...featureAnchor(tile, option.type, option.index, side, themeId), option };
 }
 
 // featureGroups.field[].anchor は従来の記法として残す。
 // 道・都市を含む全特徴の手動座標は、tile.featureAnchors へ同じ添字で指定できる。
-export function manualAnchorForFeature(tile, type, index) {
+export function manualAnchorForFeature(tile, type, index, themeId = null) {
 	const group = tile.featureGroups?.[type]?.[index];
-	return tile.featureAnchors?.[type]?.[index]
+	// 左右反転・地形180度回転済みタイルは tile.featureAnchors に変換済みの値を
+	// 持つ。テーマ上書きは通常状態の種別にだけ適用し、変換済み状態はその値を
+	// 優先する。
+	const transient = tile._themeFeatureAnchors?.[type]?.[index];
+	const themed = !tile.mirrored && tile.terrainPattern !== 'halfTurn'
+		? themedManualFeatureAnchorsFor(tile.shape, tile.idPrefix, themeId)?.[type]?.[index]
+		: null;
+	return transient
+		|| themed
+		|| tile.featureAnchors?.[type]?.[index]
 		|| (!Array.isArray(group) ? group?.anchor : null)
 		|| null;
 }

@@ -46,7 +46,8 @@ export function verticesFor(tile, side) {
 }
 
 // 辺記号は地形とは独立した形状マッチング用の情報である。
-// `verticalInverse` は地形／カードを反転せず、記号だけを上下反転する。
+// `verticalInverse` は後方互換のための内部名で、地形／カードを回転せずに
+// 辺記号だけを 180 度回転したパターンを表す。
 const NORMAL_EDGE_MATCHES = {
 	thin: {
 		AB: 'beta-concave',
@@ -62,19 +63,79 @@ const NORMAL_EDGE_MATCHES = {
 	},
 };
 
-const VERTICAL_SWAP = { thin: { A: 'C', C: 'A' }, fat: { E: 'G', G: 'E' } };
-const canonicalEdgeName = (shape, one, two) => edgeNames(shape).find((name) => name.includes(one) && name.includes(two));
-const MIRROR_EDGE_NAMES = {
-	thin: { AB: 'DA', BC: 'CD', CD: 'BC', DA: 'AB' },
-	fat: { EF: 'HE', FG: 'GH', GH: 'FG', HE: 'EF' },
+const HALF_TURN_SWAP = {
+	thin: { A: 'C', B: 'D', C: 'A', D: 'B' },
+	fat: { E: 'G', F: 'H', G: 'E', H: 'F' },
 };
+const canonicalEdgeName = (shape, one, two) => edgeNames(shape).find((name) => name.includes(one) && name.includes(two));
 
 export function matchingPatterns(shape) { return ['normal', 'verticalInverse']; }
+
+// 地形パターンは辺記号パターンとは別の状態である。`halfTurn` はカードの
+// 輪郭・盤面上の向きを変えず、地形・特徴領域だけを中心回りに180度回す。
+// そのため、候補生成では
+//   通常 / 辺記号のみ / 地形のみ / 両方
+// の4通りを独立に評価できる。
+export const TERRAIN_PATTERNS = Object.freeze(['normal', 'halfTurn']);
+
+function halfTurnEdgeMap(shape) {
+	const names = edgeNames(shape);
+	return Object.fromEntries(names.map((name, index) => [name, names[(index + 2) % names.length]]));
+}
+
+function rotateAnchorHalfTurn(anchor) {
+	return anchor ? { ...anchor, x: -anchor.x, y: -anchor.y } : anchor;
+}
+
+function halfTurnFeatureGroup(group, edgeMap) {
+	if (Array.isArray(group)) return group.map((edge) => edgeMap[edge] || edge);
+	return {
+		...group,
+		boundaryEdges: (group.boundaryEdges || []).map((edge) => edgeMap[edge] || edge),
+		anchor: rotateAnchorHalfTurn(group.anchor),
+	};
+}
+
+// `tile` を変更せず、地形だけを180度回した配置用タイルを返す。
+// フィーチャー配列の添字は保持するので、都市・道・草原の接続、ミープル、
+// 得点用の city adjacency はそのまま対応する。小領域番号だけは ①↔③、
+// ②↔④ へ移す。
+export function halfTurnTerrainTile(tile) {
+	const result = structuredClone(tile);
+	const names = edgeNames(tile.shape);
+	const edgeMap = halfTurnEdgeMap(tile.shape);
+	const subregionMap = { 1: 3, 2: 4, 3: 1, 4: 2 };
+	result.edgeTerrain = Object.fromEntries(names.map((edge) => [edgeMap[edge], tile.edgeTerrain[edge]]));
+	result.featureGroups = Object.fromEntries(
+		Object.entries(tile.featureGroups || {}).map(([type, groups]) => [
+			type,
+			groups.map((group) => halfTurnFeatureGroup(group, edgeMap)),
+		]),
+	);
+	result.featureAnchors = Object.fromEntries(
+		Object.entries(tile.featureAnchors || {}).map(([type, anchors]) => [
+			type,
+			anchors.map(rotateAnchorHalfTurn),
+		]),
+	);
+	result.roadTerminals = Object.fromEntries(
+		Object.entries(tile.roadTerminals || {}).map(([index, terminals]) => [
+			index,
+			terminals.map((terminal) => terminal.edge ? { ...terminal, edge: edgeMap[terminal.edge] } : { ...terminal }),
+		]),
+	);
+	result.fieldScoreGroups = (tile.fieldScoreGroups || []).map((group) =>
+		group.map((subregion) => subregionMap[subregion] || subregion),
+	);
+	result.terrainPattern = 'halfTurn';
+	result.terrainPatternOptions = ['halfTurn'];
+	return result;
+}
 
 export function edgeMatchesFor(shape, pattern = 'normal') {
 	const normal = NORMAL_EDGE_MATCHES[shape];
 	if (pattern !== 'verticalInverse') return structuredClone(normal);
-	const swap = VERTICAL_SWAP[shape];
+	const swap = HALF_TURN_SWAP[shape];
 	const result = {};
 	for (const [edgeName, symbol] of Object.entries(normal)) {
 		const [from, to] = edgeName;
@@ -84,8 +145,10 @@ export function edgeMatchesFor(shape, pattern = 'normal') {
 }
 
 export function edgeMatchFor(tile, edgeName) {
-	const sourceEdge = tile.mirrored ? MIRROR_EDGE_NAMES[tile.shape][edgeName] : edgeName;
-	return edgeMatchesFor(tile.shape, tile.matchingPattern || 'normal')[sourceEdge];
+	// プレイヤーの左右反転は地形カード（地形・特徴領域・アンカー）の操作であり、
+	// 形状そのものに印刷された辺記号を左右反転させない。辺記号の向きは
+	// `matchingPattern`（通常／180度回転）だけで独立して決まる。
+	return edgeMatchesFor(tile.shape, tile.matchingPattern || 'normal')[edgeName];
 }
 
 export function edgeSymbolsMatch(one, two) {
@@ -121,5 +184,8 @@ export function createTile(definition, id) {
     ...structuredClone(definition), id, centerX: 0, centerY: 0, rotation: 0,
 		// 開始タイルだけは null を取り得る。通常の山札タイルは候補生成で確定する。
 		matchingPattern: definition.matchingPattern ?? null,
+		// 地形はカード定義の通常向きで保持する。手札の候補生成時だけ、必要なら
+		// `halfTurnTerrainTile()` で別の配置状態を作る。
+		terrainPattern: definition.terrainPattern ?? 'normal',
   };
 }

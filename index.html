@@ -40,7 +40,13 @@
 					</label>
 					<label class="deck-picker" for="matching-pattern-mode-select">辺記号パターン
 						<select id="matching-pattern-mode-select" aria-label="辺記号パターンの判定方法">
-							<option value="both">通常・上下反転を判定</option>
+							<option value="both">通常・180度回転を判定</option>
+							<option value="normal-only">通常のみを判定</option>
+						</select>
+					</label>
+					<label class="deck-picker" for="terrain-pattern-mode-select">地形パターン
+						<select id="terrain-pattern-mode-select" aria-label="地形パターンの判定方法">
+							<option value="both">通常・180度回転を判定</option>
 							<option value="normal-only">通常のみを判定</option>
 						</select>
 					</label>
@@ -71,6 +77,7 @@
 						<canvas id="board" aria-label="ゲーム盤面"></canvas>
 						<div id="placement-actions" class="placement-actions hidden">
 							<button id="rotate-tile" title="180度回転" aria-label="180度回転">↻</button>
+							<button id="rotate-terrain" title="地形を180度回転" aria-label="地形を180度回転">地形↻</button>
 							<button id="confirm-placement" class="primary" title="配置を確定" aria-label="配置を確定">✓</button>
 							<button id="skip-meeple" class="primary" title="ミープルを置かない" aria-label="ミープルを置かない">→</button>
 						</div>

@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Board } from "../src/game/Board.js";
 import { GameEngine } from "../src/game/GameEngine.js";
-import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPositionKey, VERTEX_PATTERNS, vertexSequenceAt } from "../src/game/Rules.js";
-import { edgeSymbolsMatch } from "../src/game/Tile.js";
+import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPositionKey, VERTEX_PATTERNS, vertexPatternsAllow, vertexSequenceAt } from "../src/game/Rules.js";
+import { edgeSymbolsMatch, halfTurnTerrainTile } from "../src/game/Tile.js";
 import { isComplete, scoreFeature, scoreField } from "../src/game/Scoring.js";
 import { createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
-import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, manualAnchorOrder, mirrorTile } from "../src/game/TileSet.js";
+import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, manualAnchorOrder, manualFeatureAnchorsFor, MANUAL_FEATURE_ANCHORS, mirrorTile } from "../src/game/TileSet.js";
 import { TileTheme, tileAssetFilename } from "../src/ui/TileTheme.js";
 import { manualAnchorForFeature, markerForFeature } from "../src/ui/FeatureAnchors.js";
+import { MEEPLE_ASSETS, meepleLayerColors } from "../src/ui/MeepleAssets.js";
 
 const fixedRandom = () => .42;
 
@@ -19,14 +20,18 @@ test("最初の手番で提示される候補はすべて合法", () => {
   assert.ok(candidates.every((candidate) => isLegalPlacement(game.state.board, candidate)));
 });
 
-test("形状の確定・未確定配置を先に探索し、手元タイル候補はその構造候補に含まれる", () => {
+test("2π 異なる回転表現でも同じ候補位置として配置できる", () => {
+  const game = new GameEngine({ random: fixedRandom });
+  const candidate = game.candidates()[0];
+  assert.doesNotThrow(() => game.placeTile({ ...candidate, rotation: candidate.rotation + Math.PI * 2 }));
+});
+
+test("頂点型だけで確定配置を先に探索し、未確定候補は記録しない", () => {
 	const game = new GameEngine({ random: fixedRandom });
 	const firstFrontier = game.structuralFrontier();
-	assert.ok(firstFrontier.unresolved.length > 0);
+	assert.equal(firstFrontier.unresolved.length, 0);
 	assert.ok(firstFrontier.forced.every((tile) => tile._inferenceStatus === "forced"));
 	assert.ok(firstFrontier.unresolved.every((tile) => tile._inferenceStatus === "unresolved"));
-	const firstPositions = new Set(firstFrontier.all.map(structuralPositionKey));
-	assert.ok(game.candidates().every((tile) => firstPositions.has(structuralPositionKey(tile))));
 	for (const candidate of game.candidates()) for (const forced of firstFrontier.forced) {
 		if (structuralPositionKey(candidate) === structuralPositionKey(forced)) continue;
 		const obstacle = new Board(game.state.board.side);
@@ -41,7 +46,12 @@ test("形状の確定・未確定配置を先に探索し、手元タイル候�
 	const frontier = game.structuralFrontier();
 	assert.ok(frontier.forced.length > 0);
 	assert.ok(!frontier.truncated);
-	assert.ok(game.candidates().every((tile) => frontier.all.some((structure) => structuralPositionKey(structure) === structuralPositionKey(tile))));
+	for (const candidate of game.candidates()) for (const forced of frontier.forced) {
+		if (structuralPositionKey(candidate) === structuralPositionKey(forced)) continue;
+		const obstacle = new Board(game.state.board.side);
+		obstacle.tiles = [forced];
+		assert.equal(obstacle.overlaps(candidate), false);
+	}
 });
 
 test("登録済みの Lite と Standard は、現在の定義どおりに山札を生成する", () => {
@@ -411,13 +421,98 @@ test("辺記号は alpha/beta が同じで convex/concave が反対の場合だ�
 	assert.equal(edgeSymbolsMatch("beta-convex", "beta-concave"), true);
 	assert.equal(edgeSymbolsMatch("alpha-convex", "beta-concave"), false);
 	assert.equal(edgeSymbolsMatch("alpha-convex", "alpha-convex"), false);
+	assert.equal(edgeSymbolFor("thin", "AB", "verticalInverse"), "alpha-convex", "180度回転では AB は CD の記号を使う");
+	assert.equal(edgeSymbolFor("thin", "BC", "verticalInverse"), "beta-convex", "180度回転では BC は DA の記号を使う");
+	assert.equal(edgeSymbolFor("fat", "EF", "verticalInverse"), "alpha-concave", "180度回転では EF は GH の記号を使う");
+	assert.equal(edgeSymbolFor("fat", "FG", "verticalInverse"), "beta-convex", "180度回転では FG は HE の記号を使う");
 });
 
 test("通常のみモードでは開始タイルと候補に上下反転パターンを使わない", () => {
-	const game = new GameEngine({ random: fixedRandom, rules: { allowVerticalMatchingPattern: false } });
+	const game = new GameEngine({ random: fixedRandom, rules: { allowVerticalMatchingPattern: false, allowTerrainHalfTurn: false } });
 	assert.equal(game.state.board.tiles[0].matchingPattern, "normal");
 	const groups = game.candidateGroups();
 	assert.ok(groups.regular.every((candidate) => candidate.matchingPattern === "normal"));
+	assert.ok(groups.regular.every((candidate) => candidate.terrainPattern === "normal"));
+	assert.deepEqual(game.state.currentTile.terrainPatternOptions, ["normal"]);
+});
+
+test("手札は180度回転した辺記号だけのパターンでも配置候補を作れる", () => {
+	const side = 120;
+	const definition = (shape, matchingEdge, restTerrain) => ({
+		shape,
+		edgeTerrain: Object.fromEntries(edgeNames(shape).map((edge) => [edge, edge === matchingEdge ? "R" : restTerrain])),
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const board = new Board(side);
+	board.add(createTile({
+		...definition("thin", "AB", "X"),
+		matchingPattern: "verticalInverse",
+		matchingPatternOptions: ["verticalInverse"],
+	}, "inverse-start"));
+	const hand = createTile(definition("thin", "DA", "Y"), "hand");
+	const both = placementCandidates(board, hand, { allowVerticalMatchingPattern: true });
+	const normalOnly = placementCandidates(board, hand, { allowVerticalMatchingPattern: false });
+	assert.equal(normalOnly.length, 0);
+	assert.ok(both.length > 0);
+	assert.ok(both.every((candidate) => candidate.matchingPatternOptions.includes("verticalInverse")));
+});
+
+test("地形だけを180度回転した手札も、辺記号と独立して配置候補を作れる", () => {
+	const side = 120;
+	const definition = (matchingEdge, restTerrain) => ({
+		shape: "thin",
+		edgeTerrain: Object.fromEntries(edgeNames("thin").map((edge) => [edge, edge === matchingEdge ? "R" : restTerrain])),
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const board = new Board(side);
+	board.add(createTile({
+		...definition("AB", "X"),
+		matchingPattern: "normal",
+		matchingPatternOptions: ["normal"],
+	}, "terrain-start"));
+	// 通常状態では BC の道と AB は辺記号が合わない。地形だけを180度回すと
+	// 道が DA へ移り、辺記号は通常のまま接続できる。
+	const hand = createTile(definition("BC", "Y"), "terrain-hand");
+	assert.equal(placementCandidates(board, hand, { allowVerticalMatchingPattern: false, allowTerrainHalfTurn: false }).length, 0);
+	const candidates = placementCandidates(board, hand, { allowVerticalMatchingPattern: false, allowTerrainHalfTurn: true });
+	assert.ok(candidates.length > 0);
+	assert.ok(candidates.every((candidate) => candidate.terrainPattern === "halfTurn"));
+	assert.ok(candidates.every((candidate) => isLegalPlacement(board, candidate, { allowVerticalMatchingPattern: false })));
+	assert.ok(candidates.every((candidate) => !isLegalPlacement(board, candidate, { allowVerticalMatchingPattern: false, allowTerrainHalfTurn: false })));
+});
+
+test("地形の180度回転は辺・特徴・道路終点・草原小領域・アンカーを一緒に移す", () => {
+	const original = createTile({
+		shape: "thin",
+		edgeTerrain: { AB: "C", BC: "R", CD: "F", DA: "F" },
+		featureGroups: {
+			city: [["AB"]],
+			road: [["BC"]],
+			field: [{ boundaryEdges: ["CD", "DA"], anchor: { x: .2, y: -.1 } }],
+		},
+		featureAnchors: { city: [{ x: 0, y: -.35 }], road: [{ x: .25, y: 0 }], field: [{ x: -.2, y: .15 }] },
+		roadTerminals: { 0: [{ kind: "edge", edge: "BC" }] },
+		fieldScoreGroups: [[1, 2]],
+		fieldScoreCityAdjacency: { 0: [0] },
+	}, "terrain-data"), rotated = halfTurnTerrainTile(original);
+	assert.deepEqual(rotated.edgeTerrain, { AB: "F", BC: "F", CD: "C", DA: "R" });
+	assert.deepEqual(rotated.featureGroups.city, [["CD"]]);
+	assert.deepEqual(rotated.featureGroups.road, [["DA"]]);
+	assert.deepEqual(rotated.featureGroups.field[0].boundaryEdges, ["AB", "BC"]);
+	assert.deepEqual(rotated.featureAnchors.field, [{ x: .2, y: -.15 }]);
+	assert.deepEqual(rotated.roadTerminals[0], [{ kind: "edge", edge: "DA" }]);
+	assert.deepEqual(rotated.fieldScoreGroups, [[3, 4]]);
+	assert.deepEqual(rotated.fieldScoreCityAdjacency, { 0: [0] });
+	assert.equal(rotated.terrainPattern, "halfTurn");
+});
+
+test("左右反転した手札は辺記号の通常・180度回転を再評価する", () => {
+	const game = new GameEngine({ random: fixedRandom });
+	game.state.currentTile.matchingPattern = "normal";
+	game.state.currentTile.matchingPatternOptions = ["normal"];
+	game.mirrorCurrentTile();
+	assert.equal(game.state.currentTile.matchingPattern, null);
+	assert.deepEqual(game.state.currentTile.matchingPatternOptions, ["normal", "verticalInverse"]);
 });
 
 test("頂点型は指定された循環順列の連続部分だけを許可する", () => {
@@ -426,6 +521,32 @@ test("頂点型は指定された循環順列の連続部分だけを許可す�
 	assert.equal(isCyclicSegment("BDGGG", VERTEX_PATTERNS.queen), false);
 	assert.equal(isCyclicSegment("AAE", VERTEX_PATTERNS.deuce), true);
 	assert.equal(VERTEX_PATTERNS.ace, "HFDGB");
+});
+
+test("頂点型は未配置の扇形をまたいで既存頂点を連結せず、合法な候補を残す", () => {
+	const side = 120;
+	const definition = (shape) => ({
+		shape,
+		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const atOriginVertex = (shape, vertexId, degrees, id) => {
+		const rotation = degrees * Math.PI / 180, vertex = localVertices(shape, side)[vertexId];
+		return {
+			...createTile(definition(shape), id),
+			centerX: -(vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation)),
+			centerY: -(vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation)),
+			rotation,
+		};
+	};
+	// queen = G G B D G B D のうち、G / D / B の間には未配置の扇形がある。
+	// 旧判定はこれを GDB と連結して不正扱いにしていた。
+	const board = new Board(side);
+	board.add(atOriginVertex("fat", "G", 126, "queen-g"));
+	board.add(atOriginVertex("thin", "D", -162, "queen-d"));
+	board.add(atOriginVertex("thin", "B", 126, "queen-b"));
+	const candidate = atOriginVertex("thin", "D", -18, "queen-final-d");
+	assert.equal(vertexPatternsAllow(board, candidate), true);
 });
 
 test("短い頂点列から一意に決まる頂点型を確定配置探索へ使う", () => {
@@ -439,6 +560,7 @@ test("短い頂点列から一意に決まる頂点型を確定配置探索へ�
 	assert.equal(inferredVertexTypeForSequence("GGGGG"), "sun");
 	assert.equal(inferredVertexTypeForSequence("EEEEE"), "moon");
 	assert.equal(inferredVertexTypeForSequence("AAE"), "deuce");
+	assert.equal(inferredVertexTypeForSequence("EAE"), "jack");
 	assert.equal(inferredVertexTypeForSequence("FHC"), "star");
 	assert.equal(inferredVertexTypeForSequence("G"), null);
 });
@@ -459,6 +581,74 @@ test("C から star が確定した頂点では F と H の両方を連鎖して
 	const verticesAtC = frontier.forced.map((tile) =>
 		Object.entries(verticesFor(tile, 120)).find(([, vertex]) => samePoint(vertex, point))?.[0]);
 	assert.deepEqual(new Set(verticesAtC), new Set(["F", "H"]));
+});
+
+test("優先識別列を含む頂点は、列全体が一致しなくても確定配置へ連鎖する", () => {
+	const side = 120;
+	const definition = (shape) => ({
+		shape,
+		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const atOriginVertex = (shape, vertexId, degrees, id) => {
+		const rotation = degrees * Math.PI / 180, vertex = localVertices(shape, side)[vertexId];
+		const rotated = { x: vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation), y: vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation) };
+		return { ...createTile(definition(shape), id), centerX: -rotated.x, centerY: -rotated.y, rotation };
+	};
+	const forcedAtOrigin = (tiles) => {
+		const board = new Board(side);
+		tiles.forEach((tile) => board.add(tile));
+		const frontier = structuralPlacementFrontier(board, { tileOptions: [definition("thin"), definition("fat")] });
+		return new Set(frontier.forced.map((tile) =>
+			Object.entries(verticesFor(tile, side)).find(([, point]) => Math.hypot(point.x, point.y) < 1e-5)?.[0],
+		).filter(Boolean));
+	};
+
+	const hc = forcedAtOrigin([
+		atOriginVertex("fat", "H", -126, "hc-h"),
+		atOriginVertex("thin", "C", 90, "hc-c"),
+	]);
+	assert.ok(hc.has("F"), "HC は C を含むため star の F が確定する");
+
+	const gbh = forcedAtOrigin([
+		atOriginVertex("fat", "G", -54, "gbh-g"),
+		atOriginVertex("thin", "B", 90, "gbh-b"),
+		atOriginVertex("fat", "H", -18, "gbh-h"),
+	]);
+	assert.ok(gbh.has("F") && gbh.has("D"), "GBH は BH を含むため ace の F/D が確定する");
+});
+
+test("頂点型探索は実タイルと既存の確定配置を同じ頂点列として数える", () => {
+	const side = 120;
+	const definition = (shape) => ({
+		shape,
+		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const atOriginVertex = (shape, vertexId, degrees, id) => {
+		const rotation = degrees * Math.PI / 180, vertex = localVertices(shape, side)[vertexId];
+		const rotated = { x: vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation), y: vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation) };
+		return { ...createTile(definition(shape), id), centerX: -rotated.x, centerY: -rotated.y, rotation };
+	};
+	const realG = atOriginVertex("fat", "G", -54, "real-g");
+	const forcedH = { ...atOriginVertex("fat", "H", -18, "forced-h"), isStructural: true, _inferenceStatus: "forced" };
+	const newRealB = atOriginVertex("thin", "B", 90, "real-b");
+	const board = new Board(side);
+	board.add(realG);
+	const frontier = structuralPlacementFrontier(board, {
+		tileOptions: [definition("thin"), definition("fat")],
+		previous: {
+			forced: [forcedH],
+			virtualTiles: [realG, forcedH],
+			vertexTypes: [],
+			nextSerial: 1,
+		},
+		changedTile: newRealB,
+	});
+	const verticesAtOrigin = new Set(frontier.forced.map((tile) =>
+		Object.entries(verticesFor(tile, side)).find(([, point]) => Math.hypot(point.x, point.y) < 1e-5)?.[0],
+	).filter(Boolean));
+	assert.ok(verticesAtOrigin.has("F") && verticesAtOrigin.has("D"), "実G・実B・確定Hを GBH として ace を完成する");
 });
 
 test("確定頂点型は atan2 の境界をまたいでも残りの全スロットへ連鎖する", () => {
@@ -530,6 +720,37 @@ test("確定頂点型は atan2 の境界をまたいでも残りの全スロッ�
 	assert.ok(aceMissingD.vertices.has("D"), "GBHF → ace の D が確定する");
 });
 
+test("BDGB → queen は残りの D/G/G をすべて確定配置にする", () => {
+	const side = 120;
+	const definition = (shape) => ({
+		shape,
+		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const atOriginVertex = (shape, vertexId, degrees, id) => {
+		const rotation = degrees * Math.PI / 180, vertex = localVertices(shape, side)[vertexId];
+		return {
+			...createTile(definition(shape), id),
+			centerX: -(vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation)),
+			centerY: -(vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation)),
+			rotation,
+		};
+	};
+	const board = new Board(side);
+	[
+		atOriginVertex("thin", "B", 198, "queen-b1"),
+		atOriginVertex("thin", "D", 54, "queen-d1"),
+		atOriginVertex("fat", "G", 198, "queen-g1"),
+		atOriginVertex("thin", "B", 342, "queen-b2"),
+	].forEach((tile) => board.add(tile));
+	assert.equal(vertexSequenceAt(board, null, { x: 0, y: 0 }), "BDGB");
+	const frontier = structuralPlacementFrontier(board, { tileOptions: [definition("thin"), definition("fat")] });
+	const verticesAtOrigin = frontier.forced.map((tile) =>
+		Object.entries(verticesFor(tile, side)).find(([, point]) => Math.hypot(point.x, point.y) < 1e-5)?.[0],
+	).filter(Boolean);
+	assert.deepEqual(verticesAtOrigin.sort(), ["D", "G", "G"], "queen の残り3スロットをすべて確定する");
+});
+
 test("AA → deuce の E は未確定の上下反転パターンをまたいで確定する", () => {
 	const side = 120;
 	const definition = (shape) => ({
@@ -562,7 +783,50 @@ test("AA → deuce の E は未確定の上下反転パターンをまたいで�
 	assert.ok(centralVertices.includes("E"));
 });
 
-test("前ターンの仮想確定配置キャッシュは次の実盤面探索へ持ち越さない", () => {
+test("DGGGG は king 型として残る B を確定配置にする", () => {
+	const side = 120;
+	const definition = (shape) => ({
+		shape,
+		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	const atOriginVertex = (shape, vertexId, degrees, id) => {
+		const rotation = degrees * Math.PI / 180, vertex = localVertices(shape, side)[vertexId];
+		const rotated = { x: vertex.x * Math.cos(rotation) - vertex.y * Math.sin(rotation), y: vertex.x * Math.sin(rotation) + vertex.y * Math.cos(rotation) };
+		return { ...createTile(definition(shape), id), centerX: -rotated.x, centerY: -rotated.y, rotation };
+	};
+	const board = new Board(side);
+	board.add(atOriginVertex("thin", "D", -162, "d"));
+	[-18, 54, 126, 198].forEach((degrees, index) => board.add(atOriginVertex("fat", "G", degrees, `g${index}`)));
+	assert.equal(vertexSequenceAt(board, null, { x: 0, y: 0 }), "DGGGG");
+	const frontier = structuralPlacementFrontier(board, { tileOptions: [definition("thin"), definition("fat")] });
+	const centralVertices = frontier.forced.map((tile) =>
+		Object.entries(verticesFor(tile, side)).find(([, point]) => Math.hypot(point.x, point.y) < 1e-5)?.[0],
+	);
+	assert.ok(centralVertices.includes("B"));
+
+	const forcedAtOrigin = (tiles) => {
+		const localBoard = new Board(side);
+		tiles.forEach((tile) => localBoard.add(tile));
+		return new Set(structuralPlacementFrontier(localBoard, { tileOptions: [definition("thin"), definition("fat")] }).forced.map((tile) =>
+			Object.entries(verticesFor(tile, side)).find(([, point]) => Math.hypot(point.x, point.y) < 1e-5)?.[0],
+		).filter(Boolean));
+	};
+	const dgg = forcedAtOrigin([
+		atOriginVertex("thin", "D", -162, "dgg-d"),
+		atOriginVertex("fat", "G", -18, "dgg-g1"),
+		atOriginVertex("fat", "G", 54, "dgg-g2"),
+	]);
+	assert.ok(dgg.has("G") && dgg.has("B"), "DGG は型が曖昧でも GBDGG までを確定する");
+	const ggb = forcedAtOrigin([
+		atOriginVertex("fat", "G", -54, "ggb-g1"),
+		atOriginVertex("fat", "G", 18, "ggb-g2"),
+		atOriginVertex("thin", "B", 162, "ggb-b"),
+	]);
+	assert.ok(ggb.has("D") && ggb.has("G"), "GGB は型が曖昧でも GGBDG までを確定する");
+});
+
+test("確定配置の仮想盤面は次手番にも保持し、非確定配置の近傍だけを再探索する", () => {
 	const definition = (shape) => ({
 		shape,
 		edgeTerrain: shape === "thin" ? { AB: "F", BC: "F", CD: "F", DA: "F" } : { EF: "F", FG: "F", GH: "F", HE: "F" },
@@ -573,17 +837,52 @@ test("前ターンの仮想確定配置キャッシュは次の実盤面探索�
 	const fat = createTile(definition("fat"), "fat-option");
 	board.add(createTile(definition("thin"), "start"));
 	const previous = structuralPlacementFrontier(board, { tileOptions: [thin, fat] });
-	const placed = placementCandidates(board, createTile(definition("fat"), "placed"), { tileOptions: [thin, fat] })[0];
+	const ghosts = new Board(120);
+	ghosts.tiles = previous.forced;
+	const placed = placementCandidates(board, createTile(definition("fat"), "placed"), { tileOptions: [thin, fat] })
+		.find((candidate) => !ghosts.overlaps(candidate));
+	assert.ok(placed, "確定配置と重ならない通常候補がある");
 	board.add(placed);
-	const fresh = structuralPlacementFrontier(board, { tileOptions: [thin, fat] });
-	// `previous` は後方互換のため渡せても、仮想盤面由来の内容は参照しない。
-	const withPreviousArgument = structuralPlacementFrontier(board, {
+	const resumed = structuralPlacementFrontier(board, {
 		tileOptions: [thin, fat],
 		previous,
-		changedTile: { centerX: 100000, centerY: 100000 },
+		changedTile: placed,
 	});
 	const positions = (frontier) => frontier.forced.map(structuralPositionKey).sort();
-	assert.deepEqual(positions(withPreviousArgument), positions(fresh));
+	assert.ok(positions(previous).every((position) => positions(resumed).includes(position)));
+	assert.ok(resumed.virtualTiles.length > previous.virtualTiles.length);
+});
+
+test("確定配置の探索後、外周を含む全頂点を再探索しても新しい確定配置は増えない", () => {
+	const randomFor = (seed) => {
+		let value = seed >>> 0;
+		return () => {
+			value = (value * 1664525 + 1013904223) >>> 0;
+			return value / 0x100000000;
+		};
+	};
+	for (const seed of [11, 29, 47]) {
+		const game = new GameEngine({ random: randomFor(seed) });
+		for (let turn = 0; turn < 8 && !game.state.finished; turn++) {
+			const frontier = game.structuralFrontier();
+			const virtualBoard = new Board(game.state.board.side);
+			virtualBoard.tiles = structuredClone(frontier.virtualTiles);
+			const exteriorVertexKeys = new Set(virtualBoard.freeEdges().flatMap(({ edge }) => [edge.a, edge.b])
+				.map((point) => `${Math.round(point.x * 100000)}:${Math.round(point.y * 100000)}`));
+			assert.ok(exteriorVertexKeys.size > 0, `seed ${seed}, turn ${turn}: 外周頂点が存在する`);
+			// 新規盤面として渡すと、全タイルの全頂点（外周を含む）を起点に
+			// 探索する。ここで増えなければ増分探索は不動点まで到達している。
+			const fullRescan = structuralPlacementFrontier(virtualBoard, {
+				tileOptions: game.tileOptions,
+				allowVerticalMatchingPattern: game.rules.allowVerticalMatchingPattern,
+			});
+			assert.equal(fullRescan.forced.length, 0, `seed ${seed}, turn ${turn}: 全外周再探索で確定配置が増えない`);
+			const candidate = game.candidates()[0];
+			if (!candidate) break;
+			game.placeTile(candidate);
+			if (game.state.phase === "placeMeeple") game.skipMeeple();
+		}
+	}
 });
 
 test("占有済みの特徴領域へはミープルを置けない", () => {
@@ -670,6 +969,19 @@ test("全特徴の手動アンカーは共通設定を優先し、ミラー時�
 	assert.deepEqual(manualAnchorForFeature(mirrored, "field", 0), { x: .18, y: .08 });
 });
 
+test("テーマ別アンカーはdefaultを継承し、テーマ固有座標だけを上書きできる", () => {
+	const key = "thin:straight-road", theme = MANUAL_FEATURE_ANCHORS.get("meadow"), original = theme.get(key);
+	try {
+		const fallback = manualFeatureAnchorsFor("thin", "straight-road", "meadow");
+		assert.deepEqual(fallback, manualFeatureAnchorsFor("thin", "straight-road", "default"));
+		theme.set(key, { ...fallback, road: [{ x: .123, y: -.234 }] });
+		assert.deepEqual(manualFeatureAnchorsFor("thin", "straight-road", "meadow").road, [{ x: .123, y: -.234 }]);
+	} finally {
+		if (original) theme.set(key, original);
+		else theme.delete(key);
+	}
+});
+
 test("試作山札の全特徴には編集用の明示アンカーがある", () => {
 	for (const tile of createPrototypeDeck(fixedRandom)) {
 		for (const type of ["city", "road", "field"]) {
@@ -686,6 +998,11 @@ test("テーマ画像の名前は種別・形状・領域を短縮表記で含�
   assert.equal(tileAssetFilename(tile, "road", 0), "city-road-end-c_thin_road-2.png");
   assert.equal(tileAssetFilename(tile, "city", 0), "city-road-end-c_thin_city-1.png");
   assert.equal(tileAssetFilename(mirrorTile(tile), "city", 0), "city-road-end-c_thin_city-1.png");
+  const terrainRotated = halfTurnTerrainTile(tile);
+  assert.equal(tileAssetFilename(terrainRotated, "field", 0), "city-road-end-c_thin_field-134.png");
+  assert.equal(tileAssetFilename(terrainRotated, "road", 0), "city-road-end-c_thin_road-2.png");
+  assert.equal(tileAssetFilename(terrainRotated, "city", 0), "city-road-end-c_thin_city-1.png");
+  assert.equal(tileAssetFilename(halfTurnTerrainTile(mirrorTile(tile)), "city", 0), "city-road-end-c_thin_city-1.png");
 });
 
 test("テーマなしは画像レイヤーを描画しない", () => {
@@ -694,11 +1011,23 @@ test("テーマなしは画像レイヤーを描画しない", () => {
   assert.equal(theme.draw({}, {}, "field", 0, 120), false);
 });
 
+test("盤面ミープルは前面・明るい影・暗い影の正方形レイヤーを個別に持つ", () => {
+	for (const kind of ["standing", "lying"]) {
+		assert.deepEqual(Object.keys(MEEPLE_ASSETS[kind]).sort(), ["dark", "front", "light"]);
+		Object.values(MEEPLE_ASSETS[kind]).forEach((asset) => assert.match(asset, /meeple-(standing|lying)-(front|light-shadow|dark-shadow)\.svg$/));
+	}
+	const colors = meepleLayerColors("#cf4a49");
+	assert.match(colors.front, /^#[0-9a-f]{6}$/i);
+	assert.notEqual(colors.front, colors.light);
+	assert.notEqual(colors.front, colors.dark);
+});
+
 test("反転は未配置タイルに1回だけ使え、引き直し後は元の向きに戻る", () => {
   const game = new GameEngine({ random: fixedRandom });
   game.mirrorCurrentTile();
   assert.equal(game.activePlayer.mirrorUsed, true);
   assert.equal(game.state.currentTile.mirrored, true);
+	assert.ok(game.candidates().length > 0, "反転後も通常の配置候補を再計算できる");
   assert.throws(() => game.mirrorCurrentTile(), /1回まで/);
   game.redrawCurrentTile();
   assert.equal(Boolean(game.state.currentTile.mirrored), false);

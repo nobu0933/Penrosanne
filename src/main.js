@@ -16,6 +16,7 @@ const palette = {
 // 開始前設定画面ができるまでの、ルールをまとめた暫定設定値。
 const gameRules = {
 	allowVerticalMatchingPattern: true,
+	allowTerrainHalfTurn: true,
 };
 const side = Math.round(window.innerHeight / 5);
 let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules });
@@ -41,6 +42,7 @@ const el = {
 	skip: document.querySelector('#skip-meeple'),
 	options: document.querySelector('#meeple-options'),
 	rotate: document.querySelector('#rotate-tile'),
+	terrainRotate: document.querySelector('#rotate-terrain'),
 	redo: document.querySelector('#redo-tile'),
 	forceEnd: document.querySelector('#force-end'),
 	redraw: document.querySelector('#redraw-tile'),
@@ -49,6 +51,7 @@ const el = {
 	theme: document.querySelector('#theme-select'),
 	deck: document.querySelector('#deck-select'),
 	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
+	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
 	startDeck: document.querySelector('#start-deck'),
 };
 for (const deck of DECK_CONFIGS) {
@@ -61,8 +64,9 @@ for (const deck of DECK_CONFIGS) {
 let view;
 const tileTheme = new TileTheme({
 	onChange: () => {
-		view?.render();
-		drawTilePreview(engine.state.phase === 'placeTile' ? engine.state.currentTile : null);
+		// テーマごとのアンカー上書きもあるため、単なるCanvas再描画ではなく
+		// ミープル座標・配置候補を組み立て直す。
+		if (view) render();
 	},
 });
 view = new BoardView(el.board, {
@@ -71,6 +75,8 @@ view = new BoardView(el.board, {
 	candidates: [],
 	structuralCandidates: [],
 	showVertices: () => showVertices,
+	// 実際のゲーム盤面では、タイル一覧より見分けやすい約2倍の大きさで描画する。
+	meepleScale: 2,
 	onFeatureSelect: (marker) => placeMeeple(marker.option),
 	onPreviewDragStart: (event) => {
 		if (!provisional) return;
@@ -161,7 +167,7 @@ function drawTilePreview(tile) {
 	});
 }
 function markerFor(tile, option) {
-	return markerForFeature(tile, option, side);
+	return markerForFeature(tile, option, side, tileTheme.id);
 }
 function meepleMarkers() {
 	if (engine.state.phase !== 'placeMeeple') return [];
@@ -189,11 +195,40 @@ function placedMeeples() {
 }
 function alternatePlacement() {
 	if (!provisional) return null;
-	return allCandidates().find(
+	const alternatives = allCandidates().filter(
 		(candidate) =>
 			Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) <
-				1e-4 && Math.abs(Math.abs(candidate.rotation - provisional.rotation) - Math.PI) < 1e-4,
+				1e-4 && Math.abs(Math.abs(candidate.rotation - provisional.rotation) - Math.PI) < 1e-4
 	);
+	return alternatives.find((candidate) => candidate.terrainPattern === provisional.terrainPattern) || alternatives[0] || null;
+}
+function sameCandidateGeometry(one, two) {
+	const full = Math.PI * 2;
+	const difference = ((one.rotation - two.rotation + Math.PI) % full + full) % full - Math.PI;
+	return one.shape === two.shape
+		&& Math.hypot(one.centerX - two.centerX, one.centerY - two.centerY) < 1e-4
+		&& Math.abs(difference) < 1e-4;
+}
+function terrainStateSignature(tile) {
+	// 地形の半回転が対称なカードでは、候補上は normal / halfTurn の2状態が
+	// あっても実際の地形・特徴領域は変わらない。その場合は切替操作を出さない。
+	return JSON.stringify({
+		edgeTerrain: tile.edgeTerrain,
+		featureGroups: tile.featureGroups,
+		roadTerminals: tile.roadTerminals,
+		fieldScoreGroups: tile.fieldScoreGroups,
+		featureAnchors: tile.featureAnchors,
+	});
+}
+function terrainAlternatePlacement() {
+	if (!provisional) return null;
+	const currentSignature = terrainStateSignature(provisional);
+	const variants = allCandidates().filter(
+		(candidate) => sameCandidateGeometry(candidate, provisional)
+			&& terrainStateSignature(candidate) !== currentSignature,
+	);
+	if (!variants.length) return null;
+	return variants[0];
 }
 function renderMeepleOptions() {
 	el.options.replaceChildren();
@@ -275,6 +310,7 @@ function renderPlacementActions() {
 	el.placementActions.style.top = `${point.y}px`;
 	el.placementActions.classList.remove('hidden');
 	el.rotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !alternatePlacement());
+	el.terrainRotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !terrainAlternatePlacement());
 	el.confirm.classList.toggle('hidden', engine.state.phase !== 'placeTile');
 	el.skip.classList.toggle('hidden', engine.state.phase !== 'placeMeeple');
 	el.confirm.disabled = !provisional;
@@ -311,7 +347,11 @@ function render() {
 	el.forceEnd.disabled = state.finished;
 	view.options.placed = state.board.tiles;
 	view.options.candidates = state.phase === 'placeTile' ? allCandidates() : [];
-	view.options.structuralCandidates = state.phase === 'placeTile' ? engine.structuralCandidates() : [];
+	// ミープル配置中も、直前のタイル配置から導かれた確定配置は盤面情報として
+	// 継続表示する。手札の通常候補だけをタイル配置フェーズ限定にする。
+	view.options.structuralCandidates = (state.phase === 'placeTile' || state.phase === 'placeMeeple')
+		? engine.structuralCandidates()
+		: [];
 	view.candidatesVisible = true;
 	view.previewTile = provisional || dragPreview;
 	view.featureMarkers = meepleMarkers();
@@ -324,6 +364,7 @@ function render() {
 }
 function startSelectedDeck() {
 	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
+	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
 	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules });
 	provisional = null;
 	dragPreview = null;
@@ -409,6 +450,13 @@ el.redo.onclick = () => {
 };
 el.rotate.onclick = () => {
 	const alternate = alternatePlacement();
+	if (alternate) {
+		provisional = alternate;
+		render();
+	}
+};
+el.terrainRotate.onclick = () => {
+	const alternate = terrainAlternatePlacement();
 	if (alternate) {
 		provisional = alternate;
 		render();

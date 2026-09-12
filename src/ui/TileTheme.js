@@ -11,7 +11,12 @@ export function tileAssetFilename(tile, layer, index = null) {
 
 function layerSuffix(tile, layer, index) {
 	if (layer === 'field') {
-		const sourceRegion = (region) => tile.mirrored ? ({ 1: 1, 2: 4, 3: 3, 4: 2 })[region] : region;
+		const sourceRegion = (region) => {
+			const beforeTerrainHalfTurn = tile.terrainPattern === 'halfTurn'
+				? ({ 1: 3, 2: 4, 3: 1, 4: 2 })[region]
+				: region;
+			return tile.mirrored ? ({ 1: 1, 2: 4, 3: 3, 4: 2 })[beforeTerrainHalfTurn] : beforeTerrainHalfTurn;
+		};
 		const regions = (tile.fieldScoreGroups?.[index] || []).map(sourceRegion).sort((a, b) => a - b).join('');
 		return `field-${regions}`;
 	}
@@ -19,7 +24,10 @@ function layerSuffix(tile, layer, index) {
 		const group = tile.featureGroups?.[layer]?.[index];
 		const edges = (Array.isArray(group) ? group : group?.boundaryEdges || [])
 			.map(edgeIndex)
-			.map((edge) => tile.mirrored ? 4 - edge : edge + 1)
+			.map((edge) => {
+				const beforeTerrainHalfTurn = tile.terrainPattern === 'halfTurn' ? (edge + 2) % 4 : edge;
+				return tile.mirrored ? 4 - beforeTerrainHalfTurn : beforeTerrainHalfTurn + 1;
+			})
 			.sort((a, b) => a - b)
 			.join('');
 		return `${layer}-${edges}`;
@@ -52,6 +60,7 @@ export class TileTheme {
 		ctx.translate(tile.centerX, tile.centerY);
 		ctx.rotate(tile.rotation || 0);
 		if (tile.mirrored) ctx.scale(-1, 1);
+		if (tile.terrainPattern === 'halfTurn') ctx.rotate(Math.PI);
 		ctx.drawImage(tint ? this.tintedImage(image, tint) : image.element, -side, -side, side * 2, side * 2);
 		ctx.restore();
 		return true;

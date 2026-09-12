@@ -1,6 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56" role="img" aria-label="meeple reserve placeholder">
-  <g fill="#8b8b8b" stroke="#333" stroke-width="3.2" stroke-linejoin="round">
-    <circle cx="28" cy="13" r="8"/>
-    <path d="M19 25c-6 2-10 7-10 14v5h8v-7h3v14h16V37h3v7h8v-5c0-7-4-12-10-14l-3 5H22z"/>
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="_レイヤー_1" data-name="レイヤー 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 56 56">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #4d4d4d;
+      }
+    </style>
+  </defs>
+  <path class="cls-1" d="M33.03,13.8l1.68,4.88,10.96,5.46c2.43,1.21,1.99,4.81-.67,5.39l-7.37,1.18,8.34,13.93c.66,1.11-.14,2.52-1.43,2.52h-9.46c-.71,0-1.37-.34-1.78-.91l-5.31-7.41-5.31,7.41c-.41.57-1.07.91-1.78.91h-9.46c-1.29,0-2.09-1.41-1.43-2.52l8.34-13.93-7.37-1.18c-2.66-.58-3.1-4.18-.67-5.39l10.96-5.46,1.68-4.88c.74-2.15,2.76-3.58,5.03-3.58h0c2.27,0,4.29,1.44,5.03,3.58Z"/>
 </svg>

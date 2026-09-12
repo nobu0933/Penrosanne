@@ -1,5 +1,5 @@
 import { edgeIndex, edgeVertexPairs, verticesFor } from '../game/Tile.js';
-import { loadMeepleImages, meepleKindForFeature, playerColor } from './MeepleAssets.js';
+import { loadMeepleImages, meepleKindForFeature, meepleLayerColors, playerColor } from './MeepleAssets.js';
 
 const palette = {
 	field: '#a9c579',
@@ -28,6 +28,7 @@ export class BoardView {
 		// `meeples` をゲーム画面の状態更新で差し替えても消えないよう分離する。
 		this.staticMeeples = [];
 		this.hoverMarker = null;
+		this.markerDrag = null;
 		this.tileTheme = options.tileTheme || null;
 		this.meepleImages = loadMeepleImages(() => this.render());
 		this.tintedMeeples = new Map();
@@ -54,6 +55,15 @@ export class BoardView {
 		});
 		this.canvas.addEventListener('pointerdown', (event) => {
 			const world = this.worldPoint(this.screenPoint(event));
+			const marker = this.markerAt(world);
+			if (this.options.anchorEditMode?.() && marker) {
+				this.markerDrag = { marker, pointerId: event.pointerId };
+				this.hoverMarker = marker;
+				this.canvas.setPointerCapture(event.pointerId);
+				event.preventDefault();
+				this.render();
+				return;
+			}
 			if (
 				this.previewTile &&
 				Math.hypot(this.previewTile.centerX - world.x, this.previewTile.centerY - world.y) <
@@ -67,6 +77,13 @@ export class BoardView {
 			this.canvas.setPointerCapture(event.pointerId);
 		});
 		this.canvas.addEventListener('pointermove', (event) => {
+			if (this.markerDrag) {
+				const world = this.worldPoint(this.screenPoint(event));
+				this.hoverMarker = this.markerDrag.marker;
+				this.options.onFeatureDrag?.(this.markerDrag.marker, world);
+				this.render();
+				return;
+			}
 			if (!this.drag) {
 				const world = this.worldPoint(this.screenPoint(event));
 				const marker = this.markerAt(world);
@@ -86,12 +103,18 @@ export class BoardView {
 			this.render();
 		});
 		this.canvas.addEventListener('pointerleave', () => {
+			if (this.markerDrag) return;
 			if (this.hoverMarker) {
 				this.hoverMarker = null;
 				this.render();
 			}
 		});
 		this.canvas.addEventListener('pointerup', (event) => {
+			if (this.markerDrag) {
+				this.options.onFeatureDragEnd?.(this.markerDrag.marker, this.worldPoint(this.screenPoint(event)));
+				this.markerDrag = null;
+				return;
+			}
 			if (!this.drag?.moved) this.pick(event);
 			this.drag = null;
 		});
@@ -218,8 +241,8 @@ export class BoardView {
 			index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
 		});
 		ctx.closePath();
-		ctx.strokeStyle = '#151515';
-		ctx.lineWidth = 2.2;
+		ctx.strokeStyle = '#b8bcb7';
+		ctx.lineWidth = 1.8;
 		ctx.setLineDash([]);
 		ctx.stroke();
 		ctx.restore();
@@ -457,28 +480,34 @@ export class BoardView {
 			ctx.save();
 			const permanent = marker.option.type === 'field';
 			// 配置候補もミープルSVGだけを表示する。丸・四角の補助記号は使わない。
-			this.drawMeepleIcon(ctx, meepleKindForFeature(marker.option.type), marker.x, marker.y, permanent ? 21 : 17, permanent ? 13 : 23, '#0c736d');
+			const size = (permanent ? 21 : 23) * (this.options.meepleScale ?? 1);
+			this.drawMeepleIcon(ctx, meepleKindForFeature(marker.option.type), marker.x, marker.y, size, size, '#0c736d');
 			ctx.restore();
 		}
 	}
 	drawMeepleIcon(ctx, kind, x, y, width, height, color) {
-		const image = this.meepleImages[kind];
-		if (!image?.naturalWidth) return false;
+		const layers = this.meepleImages[kind];
+		if (!layers?.front?.naturalWidth) return false;
+		const colors = meepleLayerColors(color);
 		if (this.options.preserveMeepleColor) {
 			ctx.save();
-			ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
+			for (const layer of ['dark', 'light', 'front']) {
+				const image = layers[layer];
+				if (image?.naturalWidth) ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
+			}
 			ctx.restore();
 			return true;
 		}
-		const tinted = this.tintedMeeple(kind, color);
-		if (!tinted) return false;
 		ctx.save();
-		ctx.drawImage(tinted, x - width / 2, y - height / 2, width, height);
+		for (const layer of ['dark', 'light', 'front']) {
+			const tinted = this.tintedMeeple(kind, layer, colors[layer]);
+			if (tinted) ctx.drawImage(tinted, x - width / 2, y - height / 2, width, height);
+		}
 		ctx.restore();
 		return true;
 	}
-	tintedMeeple(kind, color) {
-		const image = this.meepleImages[kind], key = `${kind}:${color}`;
+	tintedMeeple(kind, layer, color) {
+		const image = this.meepleImages[kind]?.[layer], key = `${kind}:${layer}:${color}`;
 		if (!image?.naturalWidth) return null;
 		if (this.tintedMeeples.has(key)) return this.tintedMeeples.get(key);
 		const canvas = document.createElement('canvas');
@@ -499,13 +528,15 @@ export class BoardView {
 			ctx.save();
 			const highlighted = meeple.playerIndex === this.highlightPlayerIndex;
 			const kind = meepleKindForFeature(meeple.option?.type);
-			const baseWidth = kind === 'lying' ? 28 : 18, baseHeight = kind === 'lying' ? 17 : 26;
-			const scale = (highlighted ? 1.18 : 1) * (meeple.displayScale || 1), width = baseWidth * scale, height = baseHeight * scale;
+			// 各アセットは56×56の正方形。寝そべり／直立の見た目の違いは画像内の
+			// 余白とシルエットで表し、ここで縦横比を変えて歪ませない。
+			const baseSize = (kind === 'lying' ? 28 : 26) * (this.options.meepleScale ?? 1);
+			const scale = (highlighted ? 1.18 : 1) * (meeple.displayScale || 1), size = baseSize * scale;
 			if (highlighted || meeple.galleryMarker) {
 				ctx.shadowColor = '#0c736d';
 				ctx.shadowBlur = meeple.galleryMarker ? 3 : 8;
 			}
-			this.drawMeepleIcon(ctx, kind, meeple.x, meeple.y, width, height, playerColor(meeple.playerIndex));
+			this.drawMeepleIcon(ctx, kind, meeple.x, meeple.y, size, size, playerColor(meeple.playerIndex));
 			ctx.restore();
 		}
 	}
