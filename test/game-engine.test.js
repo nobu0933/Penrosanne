@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Board } from "../src/game/Board.js";
 import { GameEngine } from "../src/game/GameEngine.js";
-import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPositionKey, VERTEX_PATTERNS, vertexPatternsAllow, vertexSequenceAt } from "../src/game/Rules.js";
+import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPlacementFrontierProgressively, structuralPositionKey, VERTEX_PATTERNS, vertexPatternsAllow, vertexSequenceAt } from "../src/game/Rules.js";
 import { edgeSymbolsMatch, halfTurnTerrainTile } from "../src/game/Tile.js";
 import { isComplete, scoreFeature, scoreField } from "../src/game/Scoring.js";
 import { createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
@@ -12,6 +12,27 @@ import { manualAnchorForFeature, markerForFeature } from "../src/ui/FeatureAncho
 import { MEEPLE_ASSETS, meepleLayerColors } from "../src/ui/MeepleAssets.js";
 
 const fixedRandom = () => .42;
+
+test("盤面の辺・頂点索引は復元済み盤面でも従来と同じ近傍を返す", () => {
+  const side = 120;
+  const definition = {
+    shape: "thin",
+    edgeTerrain: { AB: "F", BC: "F", CD: "F", DA: "F" },
+    featureGroups: { city: [], road: [], field: [] },
+  };
+  const tile = createTile(definition, "indexed-tile");
+  const board = new Board(side);
+  // 仮想盤面の再開時と同じく、tiles 配列を直接復元しても索引は遅延構築される。
+  board.tiles = [structuredClone(tile)];
+  const edge = edgesFor(board.tiles[0], side)[0];
+  const reversed = { ...edge, a: edge.b, b: edge.a };
+  const vertex = verticesFor(board.tiles[0], side).A;
+
+  assert.equal(board.allEdges().length, 4);
+  assert.equal(board.matchingEdges(reversed).length, 1);
+  assert.deepEqual(board.vertexTiles(vertex).map((entry) => entry.id), ["indexed-tile"]);
+  assert.equal(board.vertexEntries(vertex)[0].vertexId, "A");
+});
 
 test("最初の手番で提示される候補はすべて合法", () => {
   const game = new GameEngine({ random: fixedRandom });
@@ -52,6 +73,19 @@ test("頂点型だけで確定配置を先に探索し、未確定候補は記�
 		obstacle.tiles = [forced];
 		assert.equal(obstacle.overlaps(candidate), false);
 	}
+});
+
+test("順次表示用の確定配置探索は同期探索と同じ順序・結果を返す", async () => {
+	const game = new GameEngine({ random: fixedRandom });
+	const options = { tileOptions: game.tileOptions, allowVerticalMatchingPattern: game.rules.allowVerticalMatchingPattern };
+	const synchronous = structuralPlacementFrontier(game.state.board, options);
+	const announced = [];
+	const progressive = await structuralPlacementFrontierProgressively(game.state.board, options, {
+		onForced: (tile) => announced.push(structuralPositionKey(tile)),
+		yieldControl: () => Promise.resolve(),
+	});
+	assert.deepEqual(progressive.forced.map(structuralPositionKey), synchronous.forced.map(structuralPositionKey));
+	assert.deepEqual(announced, progressive.forced.map(structuralPositionKey));
 });
 
 test("登録済みの Lite と Standard は、現在の定義どおりに山札を生成する", () => {
@@ -100,10 +134,9 @@ test("指定タイルは180度回転後の辺・草原小領域・アンカー�
 		}
 	}
 	const thinCurve = catalog.find((tile) => tile.shape === "thin" && tile.idPrefix === "curve-road-v");
-	assert.equal(thinCurve.featureAnchors.road[0].x, 0);
-	assert.equal(thinCurve.featureAnchors.road[0].y, .0649);
-	assert.equal(thinCurve.featureAnchors.field[0].x, 0);
-	assert.equal(thinCurve.featureAnchors.field[0].y, .25);
+	// アンカーは自動推定値ではなく、一覧画面で調整した現在の手動設定を正とする。
+	assert.deepEqual(thinCurve.featureAnchors.road, [{ x: .006, y: -.072 }]);
+	assert.deepEqual(thinCurve.featureAnchors.field, [{ x: .041, y: .122 }, { x: .631, y: -.038 }]);
 });
 
 test("追加した都市・道・修道院タイルは指定辺と道の終点を持つ", () => {
@@ -848,9 +881,17 @@ test("確定配置の仮想盤面は次手番にも保持し、非確定配置�
 		previous,
 		changedTile: placed,
 	});
+	const uncached = structuralPlacementFrontier(board, {
+		tileOptions: [thin, fat],
+		// 完全一致キャッシュの有無で、確定配置の結果が変わらないことを確認する。
+		previous: { ...previous, domainCache: new Map() },
+		changedTile: placed,
+	});
 	const positions = (frontier) => frontier.forced.map(structuralPositionKey).sort();
 	assert.ok(positions(previous).every((position) => positions(resumed).includes(position)));
 	assert.ok(resumed.virtualTiles.length > previous.virtualTiles.length);
+	assert.ok(resumed.domainCache.size > 0, "構造探索の完全一致キャッシュを記録する");
+	assert.deepEqual(positions(resumed), positions(uncached), "キャッシュの有無で確定配置を変えない");
 });
 
 test("確定配置の探索後、外周を含む全頂点を再探索しても新しい確定配置は増えない", () => {
@@ -983,12 +1024,25 @@ test("テーマ別アンカーはdefaultを継承し、テーマ固有座標だ�
 });
 
 test("試作山札の全特徴には編集用の明示アンカーがある", () => {
+	const expectedMonasteryAnchors = {
+		"thin:monastery-field": [{ x: -.015, y: .015 }],
+		"fat:monastery-field": [{ x: .017, y: .042 }],
+		"thin:monastery-road-end": [{ x: 0, y: 0 }],
+		"fat:monastery-road-end": [{ x: 0, y: 0 }],
+		"thin:monastery-road-end-reverse": [{ x: .059, y: -.017 }],
+		"fat:monastery-road-end-reverse": [{ x: 0, y: 0 }],
+		"thin:monastery-two-road-ends": [{ x: .008, y: -.02 }],
+		"fat:monastery-two-road-ends": [{ x: .006, y: -.002 }],
+	};
 	for (const tile of createPrototypeDeck(fixedRandom)) {
 		for (const type of ["city", "road", "field"]) {
 			assert.equal(tile.featureAnchors[type].length, tile.featureGroups[type].length, `${tile.id}:${type}`);
 			tile.featureGroups[type].forEach((_, index) => assert.ok(manualAnchorForFeature(tile, type, index), `${tile.id}:${type}:${index}`));
 		}
-		if (tile.hasMonastery) assert.deepEqual(tile.featureAnchors.monastery, [{ x: 0, y: 0 }], tile.id);
+		if (tile.hasMonastery) {
+			const key = `${tile.shape}:${tile.idPrefix}`;
+			assert.deepEqual(tile.featureAnchors.monastery, expectedMonasteryAnchors[key], tile.id);
+		}
 	}
 });
 

@@ -3474,7 +3474,7 @@ const CATALOG_DEFINITIONS = [
 	['monastery-road-end-reverse', 1, 'fat'],
 ];
 
-// Standard はタイル一覧（CATALOG）と同じ物理カード構成を使う。
+// Standard のタイル一覧
 const STANDARD_DEFINITIONS = [
 	// ['straight-road', 2, 'thin'],
 	// ['straight-road', 2, 'fat'],
@@ -3554,14 +3554,6 @@ const STANDARD_DEFINITIONS = [
 	['monastery-road-end', 1, 'fat'],
 	['monastery-road-end-reverse', 1, 'thin'],
 	['monastery-road-end-reverse', 1, 'fat'],
-	['city-road-end-c', 1, 'thin'],
-	['city-road-end-c', 1, 'fat'],
-	['city-road-end-c-reverse', 1, 'thin'],
-	['city-road-end-c-reverse', 1, 'fat'],
-	['city-road-end-v', 1, 'thin'],
-	['city-road-end-v', 1, 'fat'],
-	['city-road-end-v-reverse', 1, 'thin'],
-	['city-road-end-v-reverse', 1, 'fat'],
 	['city-one-two-road-ends', 1, 'thin'],
 	['city-one-two-road-ends', 1, 'fat'],
 	['city-one-two-road-ends-reverse', 1, 'thin'],
@@ -3592,7 +3584,7 @@ const STANDARD_DEFINITIONS = [
 	['monastery-two-road-ends', 1, 'fat'],
 ];
 
-// Lite は短時間用の36枚。シン／ファットを18枚ずつ含む、基本地形中心の構成。
+// Liteのタイルセット
 const LITE_DEFINITIONS = [
 	// ['curve-road-v', 3, 'thin'],
 	// ['curve-road-v', 3, 'fat'],

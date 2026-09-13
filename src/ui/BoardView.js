@@ -7,10 +7,20 @@ const palette = {
 	city: '#b55850',
 	monastery: '#d9b462',
 };
+// ミープル配置時の対象領域。通常色から少しだけ色相をずらし、輪郭を増やさずに
+// 対象の道・都市・修道院を見分けられるようにする。
+const hoverPalette = {
+	road: { theme: 'rgba(62, 174, 198, .48)', outer: '#57b8c8', inner: '#1f6979' },
+	city: { theme: 'rgba(255, 202, 82, .48)', fill: 'rgba(231, 137, 72, .92)', stroke: '#ffd26a' },
+	monastery: { theme: 'rgba(100, 174, 235, .48)', fill: '#83b8e2', stroke: '#306b96', detail: '#275777' },
+};
 const lerp = (from, to, amount) => ({
 	x: from.x + (to.x - from.x) * amount,
 	y: from.y + (to.y - from.y) * amount,
 });
+const midpoint = (one, two) => ({ x: (one.x + two.x) / 2, y: (one.y + two.y) / 2 });
+const pointDistance = (one, two) => Math.hypot(one.x - two.x, one.y - two.y);
+const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
 export class BoardView {
 	constructor(canvas, options) {
@@ -29,6 +39,8 @@ export class BoardView {
 		this.staticMeeples = [];
 		this.hoverMarker = null;
 		this.markerDrag = null;
+		this.touchPoints = new Map();
+		this.pinch = null;
 		this.tileTheme = options.tileTheme || null;
 		this.meepleImages = loadMeepleImages(() => this.render());
 		this.tintedMeeples = new Map();
@@ -54,6 +66,18 @@ export class BoardView {
 			this.render();
 		});
 		this.canvas.addEventListener('pointerdown', (event) => {
+			if (event.pointerType === 'touch') {
+				this.touchPoints.set(event.pointerId, this.screenPoint(event));
+				if (this.touchPoints.size >= 2 && this.options.allowCameraControls !== false) {
+					// 二本指になった時点で一指のクリック／ドラッグとしては扱わない。
+					this.drag = null;
+					this.markerDrag = null;
+					this.beginPinch();
+					this.canvas.setPointerCapture(event.pointerId);
+					event.preventDefault();
+					return;
+				}
+			}
 			const world = this.worldPoint(this.screenPoint(event));
 			const marker = this.markerAt(world);
 			if (this.options.anchorEditMode?.() && marker) {
@@ -77,6 +101,13 @@ export class BoardView {
 			this.canvas.setPointerCapture(event.pointerId);
 		});
 		this.canvas.addEventListener('pointermove', (event) => {
+			if (event.pointerType === 'touch' && this.touchPoints.has(event.pointerId)) {
+				this.touchPoints.set(event.pointerId, this.screenPoint(event));
+				if (this.pinch) {
+					this.updatePinch();
+					return;
+				}
+			}
 			if (this.markerDrag) {
 				const world = this.worldPoint(this.screenPoint(event));
 				this.hoverMarker = this.markerDrag.marker;
@@ -110,6 +141,7 @@ export class BoardView {
 			}
 		});
 		this.canvas.addEventListener('pointerup', (event) => {
+			if (this.finishPinchPointer(event)) return;
 			if (this.markerDrag) {
 				this.options.onFeatureDragEnd?.(this.markerDrag.marker, this.worldPoint(this.screenPoint(event)));
 				this.markerDrag = null;
@@ -118,17 +150,64 @@ export class BoardView {
 			if (!this.drag?.moved) this.pick(event);
 			this.drag = null;
 		});
+		this.canvas.addEventListener('pointercancel', (event) => {
+			if (this.finishPinchPointer(event)) return;
+			this.touchPoints.delete(event.pointerId);
+			if (this.markerDrag?.pointerId === event.pointerId) this.markerDrag = null;
+			this.drag = null;
+		});
 		this.canvas.addEventListener(
 			'wheel',
 			(event) => {
 				if (this.options.allowCameraControls === false) return;
 				event.preventDefault();
 				const scale = event.deltaY < 0 ? 1.1 : 0.9;
-				this.camera.zoom = Math.max(0.45, Math.min(2.8, this.camera.zoom * scale));
+				this.camera.zoom = Math.max(0.2, Math.min(2.8, this.camera.zoom * scale));
 				this.render();
 			},
 			{ passive: false },
 		);
+	}
+	beginPinch() {
+		const points = [...this.touchPoints.values()];
+		if (points.length < 2) return;
+		const center = midpoint(points[0], points[1]);
+		this.pinch = {
+			distance: pointDistance(points[0], points[1]),
+			zoom: this.camera.zoom,
+			world: this.worldPoint(center),
+		};
+	}
+	updatePinch() {
+		const points = [...this.touchPoints.values()];
+		if (!this.pinch || points.length < 2) return;
+		const distance = pointDistance(points[0], points[1]);
+		if (distance < 1 || this.pinch.distance < 1) return;
+		const center = midpoint(points[0], points[1]);
+		const zoom = clamp(this.pinch.zoom * (distance / this.pinch.distance), .2, 2.8);
+		// 指の中点の下にあった盤面座標を保つため、倍率と同時にカメラ座標も補正する。
+		this.zoomAt(this.pinch.world, center, zoom);
+		this.render();
+	}
+	finishPinchPointer(event) {
+		if (event.pointerType !== 'touch') return false;
+		const wasPinching = Boolean(this.pinch);
+		this.touchPoints.delete(event.pointerId);
+		if (!wasPinching) return false;
+		if (this.touchPoints.size < 2) {
+			this.pinch = null;
+			const [remaining] = this.touchPoints.values();
+			// 片方の指を離した後は、そのまま一指で盤面移動を続けられる。
+			this.drag = remaining && this.options.allowCameraControls !== false
+				? { x: remaining.x, y: remaining.y, moved: true }
+				: null;
+		}
+		return true;
+	}
+	zoomAt(world, screen, zoom) {
+		this.camera.zoom = zoom;
+		this.camera.x = screen.x - this.width / 2 - world.x * zoom;
+		this.camera.y = screen.y - this.height / 2 - world.y * zoom;
 	}
 	reset() {
 		this.camera = { x: 0, y: 0, zoom: 1 };
@@ -263,16 +342,16 @@ export class BoardView {
 			const themed = this.drawThemedLayer(ctx, tile, 'road', index), highlight = this.highlightFor(tile, 'road', index);
 			if (!themed) this.drawRoadGroup(ctx, tile, points, index);
 			if (highlight) {
-				if (themed) this.drawThemedLayer(ctx, tile, 'road', index, 'rgba(255, 239, 184, .38)');
-				else this.drawRoadGroup(ctx, tile, points, index, { outer: '#d5aa73', inner: '#745536', width: 16 });
+				if (themed) this.drawThemedLayer(ctx, tile, 'road', index, hoverPalette.road.theme);
+				else this.drawRoadGroup(ctx, tile, points, index, { ...hoverPalette.road, width: 16 });
 			}
 		});
 		(tile.featureGroups?.city || []).forEach((_, index) => {
 			const themed = this.drawThemedLayer(ctx, tile, 'city', index), highlight = this.highlightFor(tile, 'city', index);
 			if (!themed) this.drawCityGroup(ctx, tile, points, index);
 			if (highlight) {
-				if (themed) this.drawThemedLayer(ctx, tile, 'city', index, 'rgba(205, 77, 69, .46)');
-				else this.drawCityGroup(ctx, tile, points, index, { fill: 'rgba(205, 77, 69, .8)', stroke: 'transparent' });
+				if (themed) this.drawThemedLayer(ctx, tile, 'city', index, hoverPalette.city.theme);
+				else this.drawCityGroup(ctx, tile, points, index, hoverPalette.city);
 			}
 		});
 		if (
@@ -293,24 +372,18 @@ export class BoardView {
 		if (tile.hasMonastery) {
 			const themed = this.drawThemedLayer(ctx, tile, 'monastery', 0), highlight = this.highlightFor(tile, 'monastery', 0);
 			if (themed) {
-				if (highlight) this.drawThemedLayer(ctx, tile, 'monastery', 0, 'rgba(39, 125, 180, .42)');
+				if (highlight) this.drawThemedLayer(ctx, tile, 'monastery', 0, hoverPalette.monastery.theme);
 				return;
 			}
 			ctx.beginPath();
 			ctx.arc(cx, cy, 16, 0, Math.PI * 2);
-			ctx.fillStyle = palette.monastery;
+			ctx.fillStyle = highlight ? hoverPalette.monastery.fill : palette.monastery;
 			ctx.fill();
-			ctx.strokeStyle = '#8d6e38';
+			ctx.strokeStyle = highlight ? hoverPalette.monastery.stroke : '#8d6e38';
 			ctx.lineWidth = 2;
 			ctx.stroke();
-			ctx.fillStyle = '#7b5c2b';
+			ctx.fillStyle = highlight ? hoverPalette.monastery.detail : '#7b5c2b';
 			ctx.fillRect(cx - 3, cy - 15, 6, 10);
-			if (highlight) {
-				ctx.beginPath();
-				ctx.arc(cx, cy, 16, 0, Math.PI * 2);
-				ctx.fillStyle = 'rgba(39, 125, 180, .35)';
-				ctx.fill();
-			}
 		}
 	}
 	drawThemedLayer(ctx, tile, layer, index, tint = null) {

@@ -51,7 +51,6 @@ export function structuralPlacementFrontier(
 ) {
 	const structuralOptions = structuralTileOptions(tileOptions);
 	if (!structuralOptions.length) return emptyPlacementFrontier();
-
 	const resume = Boolean(previous?.virtualTiles?.length);
 	const virtual = resume ? boardFromTiles(board.side, previous.virtualTiles) : cloneBoard(board);
 	let changedVirtualTile = null;
@@ -63,23 +62,11 @@ export function structuralPlacementFrontier(
 	const forced = resume ? structuredClone(previous.forced || []) : [];
 	const forcedKeys = new Set(forced.map(structuralPositionKey));
 	const vertexTypes = new Map(resume ? previous.vertexTypes || [] : []);
-	// `virtualTiles` を新規盤面として再探索する場合も、既存の仮想タイルと
-	// ID が衝突しない連番から始める。衝突すると Board#getTile が古いタイルを
-	// 返し、実際には追加できていない位置を確定配置として扱ってしまう。
+	const searchContext = createStructuralSearchContext(previous?.domainCache);
 	let serial = resume ? previous.nextSerial || forced.length : nextStructuralSerial(virtual.tiles);
-
-	const enqueueVertex = (point) => {
-		const key = point && vertexKey(point);
-		if (!key) return;
-		queuedVertices.set(key, point);
-	};
-
-	// 事前探索は辺記号・地形・絶対禁則を一切参照しない。ルール3の頂点型だけを
-	// 使い、実タイルが増えた頂点から確定タイルを連鎖させる。
+	const enqueueVertex = (point) => queuedVertices.set(vertexKey(point), point);
 	if (!resume) for (const tile of virtual.tiles) for (const point of Object.values(verticesFor(tile, virtual.side))) enqueueVertex(point);
-	if (changedVirtualTile) {
-		for (const point of Object.values(verticesFor(changedVirtualTile, virtual.side))) enqueueVertex(point);
-	}
+	if (changedVirtualTile) for (const point of Object.values(verticesFor(changedVirtualTile, virtual.side))) enqueueVertex(point);
 	while (queuedVertices.size) {
 		const [, point] = queuedVertices.entries().next().value;
 		queuedVertices.delete(vertexKey(point));
@@ -87,15 +74,12 @@ export function structuralPlacementFrontier(
 		if (types.length === 1) vertexTypes.set(vertexKey(point), types[0]);
 		else vertexTypes.delete(vertexKey(point));
 		if (!types.length) continue;
-
-		for (const candidate of forcedVertexCompletionCandidates(virtual, point, types, structuralOptions)) {
+		for (const candidate of forcedVertexCompletionCandidates(virtual, point, types, structuralOptions, searchContext)) {
 			const forcedKey = structuralPositionKey(candidate);
 			if (forcedKeys.has(forcedKey)) continue;
 			forcedKeys.add(forcedKey);
 			const placed = commitVirtualTile(virtual, { ...candidate, _inferenceStatus: 'forced' }, serial++);
 			forced.push({ ...placed, _inferenceStatus: 'forced' });
-			// 新しいタイルの4頂点だけを次の探索対象にする。既存盤面の全頂点を
-			// 走査し直さず、頂点を共有する別の型にもここから連鎖できる。
 			for (const placedPoint of Object.values(verticesFor(placed, virtual.side))) enqueueVertex(placedPoint);
 		}
 	}
@@ -103,13 +87,94 @@ export function structuralPlacementFrontier(
 		forced,
 		unresolved: [],
 		all: forced,
-		// 仮想盤面自体も保持する。確定配置は次手番でも存在し続けるため、
-		// 非確定位置への実配置はこの盤面へ増分追加して局所探索する。
 		virtualTiles: structuredClone(virtual.tiles),
 		virtualFillabilityCache: new Map(),
 		vertexTypes: [...vertexTypes],
 		nextSerial: serial,
-		domainCache: new Map(),
+		domainCache: searchContext.cache,
+		truncated: false,
+	};
+}
+
+// UI が `yieldControl` を渡す場合だけ、確定した仮想タイルを一枚ずつ通知して
+// ブラウザへ描画機会を譲る。通常の同期探索は上の関数をそのまま使うため、
+// 順次表示をオフにした際の探索時間にはこの非同期処理の負荷が加わらない。
+export async function structuralPlacementFrontierProgressively(board, options = {}, { onForced = () => {}, yieldControl = () => Promise.resolve() } = {}) {
+	const state = createStructuralFrontierState(board, options);
+	if (!state) return emptyPlacementFrontier();
+	while (!state.done) {
+		const placed = stepStructuralFrontier(state);
+		if (!placed) continue;
+		onForced({ ...placed, _inferenceStatus: 'forced' });
+		await yieldControl();
+	}
+	return finishStructuralFrontier(state);
+}
+
+function createStructuralFrontierState(board, { tileOptions = [], previous = null, changedTile = null, changedTileAlreadyVirtual = false } = {}) {
+	const structuralOptions = structuralTileOptions(tileOptions);
+	if (!structuralOptions.length) return null;
+	const resume = Boolean(previous?.virtualTiles?.length);
+	const virtual = resume ? boardFromTiles(board.side, previous.virtualTiles) : cloneBoard(board);
+	let changedVirtualTile = null;
+	if (resume && changedTile && !changedTileAlreadyVirtual) {
+		virtual.add(changedTile);
+		changedVirtualTile = virtual.getTile(changedTile.id);
+	}
+	const state = {
+		virtual,
+		structuralOptions,
+		queuedVertices: new Map(),
+		pendingCandidates: [],
+		forced: resume ? structuredClone(previous.forced || []) : [],
+		forcedKeys: new Set((previous?.forced || []).map(structuralPositionKey)),
+		vertexTypes: new Map(resume ? previous.vertexTypes || [] : []),
+		searchContext: createStructuralSearchContext(previous?.domainCache),
+		serial: resume ? previous.nextSerial || (previous?.forced || []).length : nextStructuralSerial(virtual.tiles),
+		done: false,
+	};
+	const enqueueVertex = (point) => state.queuedVertices.set(vertexKey(point), point);
+	if (!resume) for (const tile of virtual.tiles) for (const point of Object.values(verticesFor(tile, virtual.side))) enqueueVertex(point);
+	if (changedVirtualTile) for (const point of Object.values(verticesFor(changedVirtualTile, virtual.side))) enqueueVertex(point);
+	return state;
+}
+
+function stepStructuralFrontier(state) {
+	while (!state.done) {
+		const candidate = state.pendingCandidates.shift();
+		if (candidate) {
+			const forcedKey = structuralPositionKey(candidate);
+			if (state.forcedKeys.has(forcedKey)) continue;
+			state.forcedKeys.add(forcedKey);
+			const placed = commitVirtualTile(state.virtual, { ...candidate, _inferenceStatus: 'forced' }, state.serial++);
+			state.forced.push({ ...placed, _inferenceStatus: 'forced' });
+			for (const point of Object.values(verticesFor(placed, state.virtual.side))) state.queuedVertices.set(vertexKey(point), point);
+			return placed;
+		}
+		if (!state.queuedVertices.size) {
+			state.done = true;
+			return null;
+		}
+		const [, point] = state.queuedVertices.entries().next().value;
+		state.queuedVertices.delete(vertexKey(point));
+		const types = structuralVertexTypesAt(state.virtual, point);
+		if (types.length === 1) state.vertexTypes.set(vertexKey(point), types[0]);
+		else state.vertexTypes.delete(vertexKey(point));
+		if (types.length) state.pendingCandidates = forcedVertexCompletionCandidates(state.virtual, point, types, state.structuralOptions, state.searchContext);
+	}
+	return null;
+}
+
+function finishStructuralFrontier(state) {
+	return {
+		forced: state.forced,
+		unresolved: [],
+		all: state.forced,
+		virtualTiles: structuredClone(state.virtual.tiles),
+		virtualFillabilityCache: new Map(),
+		vertexTypes: [...state.vertexTypes],
+		nextSerial: state.serial,
+		domainCache: state.searchContext.cache,
 		truncated: false,
 	};
 }
@@ -190,38 +255,53 @@ function structuralVertexTypesAt(board, point) {
 
 // 頂点型のすべての完成方法を局所的に列挙し、その全ケースに共通する位置だけを
 // 確定配置として返す。辺記号・地形・絶対禁則はここでは判定しない。
-function forcedVertexCompletionCandidates(board, point, types, options) {
+function forcedVertexCompletionCandidates(board, point, types, options, context) {
+	const cacheKey = structuralCacheKey('forced', board, point, `${types.join(',')}|${structuralOptionKey(options)}`);
+	const cached = cacheGet(context, cacheKey);
+	if (cached) return cached;
+
 	const completionPaths = [];
 	for (const type of types) {
 		const pattern = VERTEX_PATTERNS[type];
 		const maxAdditionalTiles = pattern.length - board.vertexTiles(point).length;
 		if (maxAdditionalTiles < 1) continue;
-		collectVertexCompletionPaths(board, point, pattern, options, [], maxAdditionalTiles, completionPaths);
+		completionPaths.push(...collectVertexCompletionPaths(board, point, pattern, options, maxAdditionalTiles, context));
 	}
-	if (!completionPaths.length) return [];
+	if (!completionPaths.length) return cacheSet(context, cacheKey, []);
 	const common = new Map(completionPaths[0].map((tile) => [structuralPositionKey(tile), tile]));
 	for (const path of completionPaths.slice(1)) {
 		const keys = new Set(path.map(structuralPositionKey));
 		for (const key of common.keys()) if (!keys.has(key)) common.delete(key);
 	}
-	return [...common.values()];
+	return cacheSet(context, cacheKey, [...common.values()]);
 }
 
-function collectVertexCompletionPaths(board, point, pattern, options, path, remaining, results) {
+// `path` の前置きを都度コピーせず、同じ仮想盤面から同じ頂点型を埋める後続経路を
+// キャッシュする。キーは盤面の全形状・幾何を正規化した完全一致キーなので、
+// キャッシュの有無で確定結果は変化しない。
+function collectVertexCompletionPaths(board, point, pattern, options, remaining, context) {
+	const cacheKey = structuralCacheKey('paths', board, point, `${pattern}|${remaining}|${structuralOptionKey(options)}`);
+	const cached = cacheGet(context, cacheKey);
+	if (cached) return cached;
+
 	const entries = vertexSectorsAt(board, null, point);
-	if (entries.length === pattern.length) {
-		if (vertexPatternFitsEntries(entries, pattern)) results.push(path);
-		return;
-	}
-	if (remaining <= 0 || !vertexPatternFitsEntries(entries, pattern)) return;
+	if (entries.length === pattern.length) return cacheSet(context, cacheKey, vertexPatternFitsEntries(entries, pattern) ? [[]] : []);
+	if (remaining <= 0 || !vertexPatternFitsEntries(entries, pattern)) return cacheSet(context, cacheKey, []);
 	const nextVertexIds = nextVertexIdsForPattern(entries, pattern);
-	for (const candidate of structuralVertexCandidates(board, point, pattern, options, nextVertexIds)) {
+	const paths = [];
+	for (const candidate of structuralVertexCandidates(board, point, pattern, options, nextVertexIds, context)) {
 		const next = boardWithTile(board, candidate);
-		collectVertexCompletionPaths(next, point, pattern, options, [...path, candidate], remaining - 1, results);
+		for (const suffix of collectVertexCompletionPaths(next, point, pattern, options, remaining - 1, context)) paths.push([candidate, ...suffix]);
 	}
+	return cacheSet(context, cacheKey, paths);
 }
 
-function structuralVertexCandidates(board, point, pattern, options, allowedVertexIds) {
+function structuralVertexCandidates(board, point, pattern, options, allowedVertexIds, context) {
+	const allowedKey = [...allowedVertexIds].sort().join('');
+	const cacheKey = structuralCacheKey('candidates', board, point, `${pattern}|${allowedKey}|${structuralOptionKey(options)}`);
+	const cached = cacheGet(context, cacheKey);
+	if (cached) return cached;
+
 	const candidates = new Map();
 	for (const option of options) for (const vertexId of Object.keys(localVertices(option.shape, board.side))) {
 		if (!allowedVertexIds.has(vertexId)) continue;
@@ -243,7 +323,25 @@ function structuralVertexCandidates(board, point, pattern, options, allowedVerte
 			candidates.set(structuralPositionKey(candidate), candidate);
 		}
 	}
-	return [...candidates.values()];
+	return cacheSet(context, cacheKey, [...candidates.values()]);
+}
+
+const STRUCTURAL_CACHE_LIMIT = 12000;
+function createStructuralSearchContext(previousCache) {
+	// 前回のフロンティアは、その後に読み返されない。Map 自体を引き継げば、
+	// 大きくなったキャッシュを毎手番コピーするコストも発生しない。
+	return { cache: previousCache instanceof Map ? previousCache : new Map() };
+}
+function structuralOptionKey(options) { return options.map((option) => option.shape).sort().join(','); }
+function structuralCacheKey(kind, board, point, detail) {
+	return `${kind}|${board.geometrySignature()}|${vertexKey(point)}|${detail}`;
+}
+function cacheGet(context, key) { return context.cache.get(key); }
+function cacheSet(context, key, value) {
+	// 上限超過時もキャッシュを捨てるだけで、探索結果そのものは変わらない。
+	if (context.cache.size >= STRUCTURAL_CACHE_LIMIT) context.cache.clear();
+	context.cache.set(key, value);
+	return value;
 }
 function commitVirtualTile(board, candidate, serial) {
 	applyResolvedMatchingPatternDomains(board, candidate);
@@ -298,12 +396,12 @@ function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain 
 }
 
 function hasAdjacentEdge(board, tile) {
-	return edgesFor(tile, board.side).some((edge) => board.allEdges().some(({ edge: other }) => samePoint(edge.a, other.b) && samePoint(edge.b, other.a)));
+	return edgesFor(tile, board.side).some((edge) => board.matchingEdges(edge).length > 0);
 }
 
 function allSharedTerrainMatch(board, tile) {
 	for (const edge of edgesFor(tile, board.side)) {
-		const neighbors = board.allEdges().filter(({ edge: other }) => samePoint(edge.a, other.b) && samePoint(edge.b, other.a));
+		const neighbors = board.matchingEdges(edge);
 		if (neighbors.some(({ edge: other }) => other.terrain !== edge.terrain)) return false;
 	}
 	return true;
@@ -595,16 +693,16 @@ export function vertexSequenceAt(board, candidate, point) {
 // 一貫した順列として扱える。
 function vertexSectorsAt(board, candidate, point) {
 	const entries = [];
-	for (const tile of [...board.tiles, ...(candidate ? [candidate] : [])]) {
-		for (const [vertexId, vertex] of Object.entries(verticesFor(tile, board.side))) if (samePoint(vertex, point)) {
-			// 画面座標系では atan2 の昇順が時計回りになる。ひし形は各頂点で
-			// 中心方向が内角の二等分線なので、中心角±内角/2 が扇形境界になる。
-			const direction = Math.atan2(tile.centerY - point.y, tile.centerX - point.x);
-			const vertexAngle = vertexInteriorAngle(tile.shape, vertexId);
-			const start = normalizeAngle(direction - vertexAngle / 2);
-			entries.push({ vertexId, direction, start, end: start + vertexAngle });
-		}
-	}
+	const addEntry = (tile, vertexId, vertex) => {
+		// 画面座標系では atan2 の昇順が時計回りになる。ひし形は各頂点で
+		// 中心方向が内角の二等分線なので、中心角±内角/2 が扇形境界になる。
+		const direction = Math.atan2(tile.centerY - point.y, tile.centerX - point.x);
+		const vertexAngle = vertexInteriorAngle(tile.shape, vertexId);
+		const start = normalizeAngle(direction - vertexAngle / 2);
+		entries.push({ vertexId, direction, start, end: start + vertexAngle });
+	};
+	for (const { tile, vertexId, vertex } of board.vertexEntries(point)) addEntry(tile, vertexId, vertex);
+	if (candidate) for (const [vertexId, vertex] of Object.entries(verticesFor(candidate, board.side))) if (samePoint(vertex, point)) addEntry(candidate, vertexId, vertex);
 	entries.sort((left, right) => left.start - right.start);
 	return entries;
 }

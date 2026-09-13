@@ -5,6 +5,7 @@ import { TileTheme } from './ui/TileTheme.js';
 import { markerForFeature } from './ui/FeatureAnchors.js';
 import { MEEPLE_ASSETS, playerColor } from './ui/MeepleAssets.js';
 import { DECK_CONFIGS } from './game/TileSet.js';
+import { structuralPositionKey } from './game/Rules.js';
 
 const palette = {
 	field: '#a9c579',
@@ -25,7 +26,19 @@ let showVertices = true,
 	provisional = null,
 	dragPreview = null,
 	tileDragging = false,
-	hoveredPlayerIndex = null;
+	hoveredPlayerIndex = null,
+	structuralSearchPending = false,
+	progressiveForcedCandidates = [],
+	structuralSearchToken = 0,
+	progressiveDisplayQueue = [],
+	progressiveDisplayTimer = null,
+	progressiveSearchResult = null,
+	progressiveSearchCompleted = false,
+	progressiveBaselineForcedKeys = new Set(),
+	progressiveDisplayIntervalMs = 120;
+// 1 枚ずつ増えていくことを明確に見せるための最小間隔。探索自体の結果は変えない。
+const PROGRESSIVE_FRONTIER_INTERVAL_MS = 120;
+const PROGRESSIVE_FRONTIER_MAX_DURATION_MS = 2000;
 const el = {
 	board: document.querySelector('#board'),
 	current: document.querySelector('#current-tile'),
@@ -52,6 +65,7 @@ const el = {
 	deck: document.querySelector('#deck-select'),
 	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
+	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
 	startDeck: document.querySelector('#start-deck'),
 };
 for (const deck of DECK_CONFIGS) {
@@ -94,10 +108,102 @@ view = new BoardView(el.board, {
 });
 
 function displayCandidates() {
-	return engine.candidates().map((tile, index) => ({ ...tile, _candidateKey: `regular:${tile.id}:${index}` }));
+	return displayCandidateTiles(engine.candidates());
+}
+function displayCandidateTiles(tiles) { return tiles.map((tile, index) => ({ ...tile, _candidateKey: `regular:${tile.id}:${index}` })); }
+function resetProgressiveDisplay({ preserveVisible = false } = {}) {
+	if (progressiveDisplayTimer !== null) clearTimeout(progressiveDisplayTimer);
+	progressiveDisplayTimer = null;
+	progressiveDisplayQueue = [];
+	progressiveSearchResult = null;
+	progressiveSearchCompleted = false;
+	progressiveBaselineForcedKeys = new Set();
+	progressiveDisplayIntervalMs = PROGRESSIVE_FRONTIER_INTERVAL_MS;
+	if (!preserveVisible) progressiveForcedCandidates = [];
+}
+function progressiveForcedHas(tile) {
+	const key = structuralPositionKey(tile);
+	return progressiveForcedCandidates.some((entry) => structuralPositionKey(entry) === key)
+		|| progressiveDisplayQueue.some((entry) => structuralPositionKey(entry) === key);
+}
+function removeProgressiveForcedCandidate(tile) {
+	const key = structuralPositionKey(tile);
+	progressiveForcedCandidates = progressiveForcedCandidates.filter((entry) => structuralPositionKey(entry) !== key);
+	progressiveDisplayQueue = progressiveDisplayQueue.filter((entry) => structuralPositionKey(entry) !== key);
+}
+function queueProgressiveForced(tile, token) {
+	if (token !== structuralSearchToken || progressiveForcedHas(tile)) return;
+	progressiveDisplayQueue.push(tile);
+	if (progressiveDisplayTimer === null && progressiveForcedCandidates.length === 0) revealNextProgressiveForced(token, true);
+	else if (progressiveDisplayTimer === null) revealNextProgressiveForced(token);
+}
+function revealNextProgressiveForced(token, immediately = false) {
+	const reveal = () => {
+		progressiveDisplayTimer = null;
+		if (token !== structuralSearchToken) return;
+		const tile = progressiveDisplayQueue.shift();
+		if (tile) {
+			progressiveForcedCandidates.push(tile);
+			render();
+		}
+		if (progressiveDisplayQueue.length) revealNextProgressiveForced(token);
+		else finishProgressiveDisplay(token);
+	};
+	if (immediately) reveal();
+	else progressiveDisplayTimer = setTimeout(reveal, progressiveDisplayIntervalMs);
+}
+function finishProgressiveDisplay(token) {
+	if (token !== structuralSearchToken || !progressiveSearchCompleted || !progressiveSearchResult || progressiveDisplayQueue.length || progressiveDisplayTimer !== null) return;
+	// コールバックを通らないキャッシュ済みの探索結果も、最後には完全な集合へそろえる。
+	progressiveForcedCandidates = progressiveSearchResult.forced;
+	candidates = displayCandidateTiles(progressiveSearchResult.regular);
+	structuralSearchPending = false;
+	progressiveSearchResult = null;
+	render();
 }
 function refreshCandidates() {
-	candidates = engine.state.phase === 'placeTile' ? displayCandidates() : [];
+	const token = ++structuralSearchToken;
+	if (engine.state.phase !== 'placeTile') {
+		resetProgressiveDisplay({ preserveVisible: true });
+		candidates = [];
+		structuralSearchPending = false;
+		return;
+	}
+	engine.deferCandidateSearch = Boolean(el.progressiveFrontier.checked);
+	if (!engine.deferCandidateSearch) {
+		resetProgressiveDisplay();
+		structuralSearchPending = false;
+		candidates = displayCandidates();
+		return;
+	}
+	// 前盤面から残る確定配置は最初から表示し、新しく増えた分だけをキューに載せる。
+	resetProgressiveDisplay({ preserveVisible: true });
+	progressiveBaselineForcedKeys = new Set(progressiveForcedCandidates.map(structuralPositionKey));
+	candidates = [];
+	structuralSearchPending = true;
+	resolveCandidatesProgressively(token);
+}
+async function resolveCandidatesProgressively(token) {
+	const groups = await engine.candidateGroupsProgressively({
+		onForced: (tile) => {
+			queueProgressiveForced(tile, token);
+		},
+		// 描画の間隔は下の表示キューで制御する。探索ごとの rAF 待機は入れず、
+		// 確定数に応じて全アニメーション時間を上限内に収める。
+		yieldControl: () => Promise.resolve(),
+	});
+	if (token !== structuralSearchToken) return;
+	progressiveSearchResult = groups;
+	const addedCount = groups.forced.filter((tile) => !progressiveBaselineForcedKeys.has(structuralPositionKey(tile))).length;
+	progressiveDisplayIntervalMs = Math.min(
+		PROGRESSIVE_FRONTIER_INTERVAL_MS,
+		PROGRESSIVE_FRONTIER_MAX_DURATION_MS / Math.max(1, addedCount - 1),
+	);
+	// キャッシュ命中時は onForced が呼ばれないので、未表示分をここでキューへ補う。
+	groups.forced.forEach((tile) => queueProgressiveForced(tile, token));
+	// ここより前はキュー投入中なので、途中で表示完了として扱わない。
+	progressiveSearchCompleted = true;
+	finishProgressiveDisplay(token);
 }
 function allCandidates() { return candidates; }
 function drawTilePreview(tile) {
@@ -319,7 +425,8 @@ function renderPlacementActions() {
 function render() {
 	const { state } = engine,
 		player = engine.activePlayer,
-		handTile = state.phase === 'placeTile' ? state.currentTile : null;
+		handTile = state.phase === 'placeTile' ? state.currentTile : null,
+		searchPending = structuralSearchPending && state.phase === 'placeTile';
 	el.activeLabel.textContent = state.finished ? 'GAME OVER' : `PLAYER ${state.turn + 1}`;
 	el.heading.textContent = state.finished
 		? '対局終了'
@@ -338,11 +445,11 @@ function render() {
 	drawTilePreview(handTile);
 	el.current.classList.toggle('hidden', Boolean(provisional) || state.phase !== 'placeTile');
 	el.redo.classList.toggle('hidden', !provisional);
-	const noRegular = engine.candidates().length === 0;
-	el.redraw.disabled = state.phase !== 'placeTile' || (!noRegular && player.redrawUsed) || Boolean(provisional);
+	const noRegular = !searchPending && candidates.length === 0;
+	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || (!noRegular && player.redrawUsed) || Boolean(provisional);
 	el.redraw.textContent = noRegular ? '↺ 通常候補なし：引き直し' : '↺ 引き直し（1回）';
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
-	el.mirror.disabled = state.phase !== 'placeTile' || player.mirrorUsed || Boolean(provisional);
+	el.mirror.disabled = searchPending || state.phase !== 'placeTile' || player.mirrorUsed || Boolean(provisional);
 	el.mirror.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
 	el.forceEnd.disabled = state.finished;
 	view.options.placed = state.board.tiles;
@@ -350,7 +457,7 @@ function render() {
 	// ミープル配置中も、直前のタイル配置から導かれた確定配置は盤面情報として
 	// 継続表示する。手札の通常候補だけをタイル配置フェーズ限定にする。
 	view.options.structuralCandidates = (state.phase === 'placeTile' || state.phase === 'placeMeeple')
-		? engine.structuralCandidates()
+		? engine.deferCandidateSearch ? progressiveForcedCandidates : engine.structuralCandidates()
 		: [];
 	view.candidatesVisible = true;
 	view.previewTile = provisional || dragPreview;
@@ -365,9 +472,10 @@ function render() {
 function startSelectedDeck() {
 	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
 	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
-	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules });
+	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules, deferCandidateSearch: el.progressiveFrontier.checked });
 	provisional = null;
 	dragPreview = null;
+	resetProgressiveDisplay();
 	refreshCandidates();
 	render();
 }
@@ -443,6 +551,16 @@ document.querySelector('#vertex-toggle').onchange = (event) => {
 	view.render();
 };
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
+el.progressiveFrontier.onchange = () => {
+	// 実行中の探索は中断せず、切替後のモードは次の候補探索から適用する。
+	if (structuralSearchPending) return;
+	if (el.progressiveFrontier.checked && !engine.deferCandidateSearch && engine.state.phase === 'placeTile') {
+		// 通常表示から切り替えた場合も、すでに見えている確定配置を基準にする。
+		progressiveForcedCandidates = engine.structuralCandidates();
+	}
+	refreshCandidates();
+	render();
+};
 el.startDeck.onclick = startSelectedDeck;
 el.redo.onclick = () => {
 	provisional = null;
@@ -465,6 +583,9 @@ el.terrainRotate.onclick = () => {
 el.confirm.onclick = () => {
 	if (!provisional) return;
 	const { _candidateKey, ...placement } = provisional;
+	// 確定枠の位置へ実タイルを置いた場合は、その枠だけを盤面表示から外す。
+	// ほかの既知の確定配置はそのまま残るため、追加分のアニメーションは発生しない。
+	removeProgressiveForcedCandidate(placement);
 	engine.placeTile(placement);
 	provisional = null;
 	dragPreview = null;
