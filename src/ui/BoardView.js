@@ -97,7 +97,11 @@ export class BoardView {
 				return;
 			}
 			if (this.options.allowCameraControls === false) return;
-			this.drag = { x: event.clientX, y: event.clientY, moved: false };
+			// 通常ドラッグとピンチ解除後のドラッグは、どちらも Canvas 内座標で保持する。
+			// client 座標と混在させると、片方の指を離した直後に Canvas の配置分だけ
+			// カメラが跳ねる。
+			const point = this.screenPoint(event);
+			this.drag = { x: point.x, y: point.y, moved: false };
 			this.canvas.setPointerCapture(event.pointerId);
 		});
 		this.canvas.addEventListener('pointermove', (event) => {
@@ -124,13 +128,14 @@ export class BoardView {
 				}
 				return;
 			}
-			const dx = event.clientX - this.drag.x,
-				dy = event.clientY - this.drag.y;
+			const point = this.screenPoint(event),
+				dx = point.x - this.drag.x,
+				dy = point.y - this.drag.y;
 			if (Math.hypot(dx, dy) > 3) this.drag.moved = true;
 			this.camera.x += dx;
 			this.camera.y += dy;
-			this.drag.x = event.clientX;
-			this.drag.y = event.clientY;
+			this.drag.x = point.x;
+			this.drag.y = point.y;
 			this.render();
 		});
 		this.canvas.addEventListener('pointerleave', () => {
