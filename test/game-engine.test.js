@@ -514,6 +514,29 @@ test("地形だけを180度回転した手札も、辺記号と独立して配�
 	assert.ok(candidates.every((candidate) => !isLegalPlacement(board, candidate, { allowVerticalMatchingPattern: false, allowTerrainHalfTurn: false })));
 });
 
+test("無制限の地形反転候補は通常・反転と180度回転を独立に評価する", () => {
+	const side = 120;
+	const definition = (matchingEdge, restTerrain) => ({
+		shape: "thin",
+		edgeTerrain: Object.fromEntries(edgeNames("thin").map((edge) => [edge, edge === matchingEdge ? "R" : restTerrain])),
+		featureGroups: { city: [], road: [], field: [] },
+	});
+	let mirroredCandidate = null;
+	for (const startEdge of edgeNames("thin")) for (const handEdge of edgeNames("thin")) {
+		const board = new Board(side);
+		board.add(createTile({ ...definition(startEdge, "X"), matchingPattern: "normal", matchingPatternOptions: ["normal"] }, `mirror-start-${startEdge}`));
+		const hand = createTile(definition(handEdge, "Y"), `mirror-hand-${handEdge}`);
+		const candidates = placementCandidates(board, hand, {
+			allowVerticalMatchingPattern: false,
+			allowTerrainHalfTurn: true,
+			allowTerrainMirror: true,
+		});
+		mirroredCandidate ||= candidates.find((candidate) => candidate.mirrored);
+	}
+	assert.ok(mirroredCandidate, "左右反転した地形の候補も生成する");
+	assert.ok(["normal", "halfTurn"].includes(mirroredCandidate.terrainPattern));
+});
+
 test("地形の180度回転は辺・特徴・道路終点・草原小領域・アンカーを一緒に移す", () => {
 	const original = createTile({
 		shape: "thin",
@@ -1077,7 +1100,7 @@ test("盤面ミープルは前面・明るい影・暗い影の正方形レイ�
 });
 
 test("反転は未配置タイルに1回だけ使え、引き直し後は元の向きに戻る", () => {
-  const game = new GameEngine({ random: fixedRandom });
+  const game = new GameEngine({ random: fixedRandom, rules: { allowTerrainMirror: false } });
   game.mirrorCurrentTile();
   assert.equal(game.activePlayer.mirrorUsed, true);
   assert.equal(game.state.currentTile.mirrored, true);
@@ -1086,6 +1109,17 @@ test("反転は未配置タイルに1回だけ使え、引き直し後は元の�
   game.redrawCurrentTile();
   assert.equal(Boolean(game.state.currentTile.mirrored), false);
   assert.ok(game.state.deck.every((tile) => !tile.mirrored));
+});
+
+test("地形反転を無制限にするモードでは同じ手札を何度でも左右反転できる", () => {
+	const game = new GameEngine({ random: fixedRandom, rules: { allowTerrainMirror: true } });
+	const originalId = game.state.currentTile.id;
+	game.mirrorCurrentTile();
+	assert.equal(game.activePlayer.mirrorUsed, false);
+	assert.equal(game.state.currentTile.mirrored, true);
+	game.mirrorCurrentTile();
+	assert.equal(Boolean(game.state.currentTile.mirrored), false);
+	assert.equal(game.state.currentTile.id, originalId);
 });
 
 test("完成都市は紋章を含めて2倍得点", () => {

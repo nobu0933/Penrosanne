@@ -445,7 +445,8 @@ hr {
 	border: 1px solid var(--line);
 	padding: .42rem;
 }
-.gallery-anchor-tools {
+.gallery-anchor-tools,
+.gallery-deck-tools {
 	display: grid;
 	gap: 8px;
 	font-size: .64rem;
@@ -453,7 +454,8 @@ hr {
 	white-space: nowrap;
 }
 .anchor-edit-toggle { display: flex; align-items: center; gap: 6px; }
-.gallery-anchor-tools button {
+.gallery-anchor-tools button,
+.gallery-deck-tools button {
 	font: inherit;
 	font-size: .61rem;
 	padding: .48rem .62rem;
@@ -471,6 +473,16 @@ hr {
 	box-shadow: 0 8px 22px rgba(31,37,31,.06);
 	overflow: hidden;
 }
+.tile-debug-card.deck-adjustable { cursor: pointer; }
+.tile-debug-card.deck-adjustable:hover { border-color: #2d766f; box-shadow: 0 8px 22px rgba(31, 95, 87, .16); }
+.tile-debug-card.deck-excluded {
+	background: #e4e5e2;
+	border-color: #aeb3ad;
+	filter: grayscale(1);
+	opacity: .66;
+}
+.tile-debug-card.deck-excluded:hover { opacity: .86; }
+.gallery-deck-tools .small-note { margin: 0; max-width: 190px; line-height: 1.45; }
 .tile-debug-card header { padding: 15px 16px 10px; }
 .tile-debug-card h2 { font-size: .9rem; overflow-wrap: anywhere; }
 .tile-debug-meta { margin: 6px 0 0; color: #647267; font-size: .61rem; }
@@ -533,7 +545,7 @@ hr {
 	.topbar-link { margin-left: auto; margin-right: 0; }
 	.tile-gallery-toolbar { display: block; padding: 16px; }
 	.gallery-theme-label { margin-top: 14px; width: max-content; }
-	.gallery-anchor-tools { margin-top: 14px; width: max-content; }
+	.gallery-anchor-tools, .gallery-deck-tools { margin-top: 14px; width: max-content; }
 	.tile-gallery { grid-template-columns: 1fr; gap: 10px; }
 	.board-heading {
 		margin-top: 12px;

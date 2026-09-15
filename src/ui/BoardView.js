@@ -78,6 +78,9 @@ export class BoardView {
 					return;
 				}
 			}
+			// 右クリックは仮置きタイルの候補パターン巡回に使う。ここで通常の
+			// クリック／ドラッグ処理へ入ると、直後の pointerup で候補選択してしまう。
+			if (event.button !== 0) return;
 			const world = this.worldPoint(this.screenPoint(event));
 			const marker = this.markerAt(world);
 			if (this.options.anchorEditMode?.() && marker) {
@@ -90,8 +93,7 @@ export class BoardView {
 			}
 			if (
 				this.previewTile &&
-				Math.hypot(this.previewTile.centerX - world.x, this.previewTile.centerY - world.y) <
-					this.options.side
+				this.pointIsInTile(this.previewTile, world)
 			) {
 				this.options.onPreviewDragStart?.(event);
 				return;
@@ -147,6 +149,7 @@ export class BoardView {
 		});
 		this.canvas.addEventListener('pointerup', (event) => {
 			if (this.finishPinchPointer(event)) return;
+			if (event.button !== 0) return;
 			if (this.markerDrag) {
 				this.options.onFeatureDragEnd?.(this.markerDrag.marker, this.worldPoint(this.screenPoint(event)));
 				this.markerDrag = null;
@@ -160,6 +163,13 @@ export class BoardView {
 			this.touchPoints.delete(event.pointerId);
 			if (this.markerDrag?.pointerId === event.pointerId) this.markerDrag = null;
 			this.drag = null;
+		});
+		this.canvas.addEventListener('contextmenu', (event) => {
+			if (!this.previewTile || !this.options.onPreviewPatternCycle) return;
+			const world = this.worldPoint(this.screenPoint(event));
+			if (!this.pointIsInTile(this.previewTile, world)) return;
+			event.preventDefault();
+			this.options.onPreviewPatternCycle();
 		});
 		this.canvas.addEventListener(
 			'wheel',
@@ -234,6 +244,19 @@ export class BoardView {
 			x: this.width / 2 + this.camera.x + point.x * this.camera.zoom,
 			y: this.height / 2 + this.camera.y + point.y * this.camera.zoom,
 		};
+	}
+	pointIsInTile(tile, point) {
+		const points = Object.values(verticesFor(tile, this.options.side));
+		let sign = 0;
+		for (let index = 0; index < points.length; index++) {
+			const from = points[index], to = points[(index + 1) % points.length];
+			const cross = (to.x - from.x) * (point.y - from.y) - (to.y - from.y) * (point.x - from.x);
+			if (Math.abs(cross) < 1e-7) continue;
+			const nextSign = Math.sign(cross);
+			if (sign && sign !== nextSign) return false;
+			sign = nextSign;
+		}
+		return true;
 	}
 	pick(event) {
 		const world = this.worldPoint(this.screenPoint(event));

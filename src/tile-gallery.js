@@ -13,10 +13,14 @@ const themeSelect = document.querySelector('#gallery-theme-select');
 const deckSelect = document.querySelector('#gallery-deck-select');
 const anchorEditToggle = document.querySelector('#anchor-edit-toggle');
 const copyAnchors = document.querySelector('#copy-anchor-definitions');
+const deckAdjustToggle = document.querySelector('#deck-adjust-toggle');
+const copyDeckDefinitions = document.querySelector('#copy-deck-definitions');
+const deckAdjustStatus = document.querySelector('#deck-adjust-status');
 const views = [];
 const anchorDrafts = new Map();
 let renderQueued = false;
 let anchorEditMode = false;
+let deckEditMode = false;
 const tileTheme = new TileTheme({
 	id: themeSelect.value,
 	onChange: queueRender,
@@ -28,6 +32,10 @@ const deckCounts = {
 		countsByDefinition(createPrototypeDeck(() => true, deck.id)),
 	])),
 };
+// 元の DECK_DEFINITIONS には手を加えず、一覧画面内だけで調整する下書き。
+const deckDrafts = new Map(
+	DECK_CONFIGS.map((deck) => [deck.id, new Map(deckCounts[deck.id])]),
+);
 
 const catalog = uniqueTiles(createTileCatalog(() => true))
 	.sort((left, right) => manualAnchorOrder(left) - manualAnchorOrder(right));
@@ -37,7 +45,13 @@ themeSelect.addEventListener('change', (event) => {
 	tileTheme.setTheme(event.target.value);
 	renderCatalog();
 });
-deckSelect.addEventListener('change', renderCatalog);
+deckSelect.addEventListener('change', () => {
+	if (deckSelect.value === 'catalog' && deckEditMode) {
+		deckEditMode = false;
+		deckAdjustToggle.checked = false;
+	}
+	renderCatalog();
+});
 anchorEditToggle.addEventListener('change', (event) => {
 	anchorEditMode = event.target.checked;
 	views.forEach(({ view }) => {
@@ -46,6 +60,23 @@ anchorEditToggle.addEventListener('change', (event) => {
 	});
 });
 copyAnchors.addEventListener('click', copyCurrentThemeAnchors);
+deckAdjustToggle.addEventListener('change', (event) => {
+	if (deckSelect.value === 'catalog') {
+		event.target.checked = false;
+		deckEditMode = false;
+		updateDeckAdjustControls();
+		return;
+	}
+	deckEditMode = event.target.checked;
+	if (deckEditMode) {
+		// クリック操作をタイル数の増減に専念させる。
+		anchorEditMode = false;
+		anchorEditToggle.checked = false;
+	}
+	updateDeckAdjustControls();
+	renderCatalog();
+});
+copyDeckDefinitions.addEventListener('click', copyCurrentDeckDefinitions);
 
 function addDeckOptions() {
 	for (const deck of [{ id: 'catalog', label: '全タイル（CATALOG）' }, ...DECK_CONFIGS]) {
@@ -60,9 +91,13 @@ function renderCatalog() {
 	const deckId = deckSelect.value || 'catalog';
 	gallery.replaceChildren();
 	views.splice(0);
-	for (const tile of catalog.filter((candidate) => deckId === 'catalog' || deckCount(candidate, deckId) > 0)) {
+	const tiles = deckEditMode
+		? catalog
+		: catalog.filter((candidate) => deckId === 'catalog' || deckCount(candidate, deckId) > 0);
+	for (const tile of tiles) {
 		addTileCard(tile);
 	}
+	updateDeckAdjustControls();
 }
 
 function queueRender() {
@@ -130,6 +165,24 @@ function addTileCard(source) {
 	}
 	card.append(heading, canvasWrap, anchorList);
 	gallery.append(card);
+	const updateDeckState = () => {
+		const selectedCount = deckCount(tile, deckSelect.value);
+		card.classList.toggle('deck-adjustable', deckEditMode);
+		card.classList.toggle('deck-excluded', deckEditMode && selectedCount === 0);
+		details.textContent = `${tile.shape.toUpperCase()} ／ ${deckMembership(tile)}`;
+	};
+	card.addEventListener('click', (event) => {
+		if (!deckEditMode || event.button !== 0) return;
+		adjustDeckCount(tile, 1);
+		updateDeckState();
+	});
+	card.addEventListener('contextmenu', (event) => {
+		if (!deckEditMode) return;
+		event.preventDefault();
+		adjustDeckCount(tile, -1);
+		updateDeckState();
+	});
+	updateDeckState();
 
 	const view = new BoardView(canvas, {
 		side,
@@ -148,19 +201,48 @@ function addTileCard(source) {
 	view.canvas.classList.toggle('anchor-editing', anchorEditMode);
 	refreshTileMarkers(view, tile);
 	view.render();
-	views.push({ view, tile, anchorList });
+	views.push({ view, tile, anchorList, card, updateDeckState });
 }
 
 function deckMembership(tile) {
 	const key = `${tile.shape}:${tile.idPrefix}`;
 	return ['catalog', ...DECK_CONFIGS.map((deck) => deck.id)]
-		.map((deck) => `${deck.toUpperCase()} ${deckCounts[deck].get(key) || 0}`)
+		.map((deck) => `${deck.toUpperCase()} ${deckCount(tile, deck)}`)
 		.join(' / ');
 }
 
 function deckCount(tile, deckId) {
 	const key = `${tile.shape}:${tile.idPrefix}`;
-	return deckCounts[deckId]?.get(key) || 0;
+	const counts = deckDrafts.get(deckId) || deckCounts[deckId];
+	return counts?.get(key) || 0;
+}
+
+function adjustDeckCount(tile, amount) {
+	const deckId = deckSelect.value;
+	const counts = deckDrafts.get(deckId);
+	if (!counts) return;
+	const key = `${tile.shape}:${tile.idPrefix}`;
+	counts.set(key, Math.max(0, (counts.get(key) || 0) + amount));
+	updateDeckAdjustControls();
+}
+
+function updateDeckAdjustControls() {
+	const deckId = deckSelect.value || 'catalog';
+	const editable = deckId !== 'catalog';
+	deckAdjustToggle.disabled = !editable;
+	if (!editable && deckEditMode) {
+		deckEditMode = false;
+		deckAdjustToggle.checked = false;
+	}
+	copyDeckDefinitions.disabled = !editable;
+	if (!editable) {
+		deckAdjustStatus.textContent = 'CATALOG は参照用です。ゲーム用デッキを選択してください。';
+		return;
+	}
+	const total = [...deckDrafts.get(deckId).values()].reduce((sum, count) => sum + count, 0);
+	deckAdjustStatus.textContent = deckEditMode
+		? `${deckId.toUpperCase()}：${total}枚（左クリック +1／右クリック -1）`
+		: `${deckId.toUpperCase()}：${total}枚`;
 }
 
 function anchorThemeId() {
@@ -218,10 +300,21 @@ function updateAnchorRows(tile, anchorList) {
 async function copyCurrentThemeAnchors() {
 	const theme = anchorThemeId();
 	const text = serializeThemeAnchors(theme);
+	await copyText(text, '✓ 現在のテーマの全アンカーをコピーしました', copyAnchors);
+}
+
+async function copyCurrentDeckDefinitions() {
+	const deckId = deckSelect.value;
+	if (deckId === 'catalog') return;
+	const text = serializeDeckDefinitions(deckId);
+	await copyText(text, `✓ ${deckId.toUpperCase()} のデッキ定義をコピーしました`, copyDeckDefinitions);
+}
+
+async function copyText(text, message, button) {
 	try {
 		if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
 		await navigator.clipboard.writeText(text);
-		showCopyResult('✓ 現在のテーマの全アンカーをコピーしました');
+		showCopyResult(message, button);
 	} catch {
 		const textarea = document.createElement('textarea');
 		textarea.value = text;
@@ -231,8 +324,22 @@ async function copyCurrentThemeAnchors() {
 		textarea.select();
 		document.execCommand('copy');
 		textarea.remove();
-		showCopyResult('✓ 現在のテーマの全アンカーをコピーしました');
+		showCopyResult(message, button);
 	}
+}
+
+function serializeDeckDefinitions(deckId) {
+	const definitionName = {
+		lite: 'LITE_DEFINITIONS',
+		standard: 'STANDARD_DEFINITIONS',
+		'road-only': 'ROAD_ONLY_DEFINITIONS',
+	}[deckId];
+	const counts = deckDrafts.get(deckId);
+	const lines = catalog.flatMap((tile) => {
+		const count = counts.get(`${tile.shape}:${tile.idPrefix}`) || 0;
+		return count ? [`\t['${tile.idPrefix}', ${count}, '${tile.shape}'],`] : [];
+	});
+	return `const ${definitionName} = [\n${lines.join('\n')}\n];`;
 }
 
 function serializeThemeAnchors(theme) {
@@ -248,10 +355,10 @@ function formatAnchorList(anchors = []) {
 	return `[${anchors.map((anchor) => `[${format(anchor.x)}, ${format(anchor.y)}]`).join(', ')}]`;
 }
 
-function showCopyResult(message) {
-	const initial = copyAnchors.textContent;
-	copyAnchors.textContent = message;
-	setTimeout(() => { copyAnchors.textContent = initial; }, 1800);
+function showCopyResult(message, button = copyAnchors) {
+	const initial = button.textContent;
+	button.textContent = message;
+	setTimeout(() => { button.textContent = initial; }, 1800);
 }
 
 function featureMarkers(tile) {

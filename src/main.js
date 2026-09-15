@@ -18,6 +18,7 @@ const palette = {
 const gameRules = {
 	allowVerticalMatchingPattern: true,
 	allowTerrainHalfTurn: true,
+	allowTerrainMirror: true,
 };
 const side = Math.round(window.innerHeight / 5);
 let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules });
@@ -56,6 +57,7 @@ const el = {
 	options: document.querySelector('#meeple-options'),
 	rotate: document.querySelector('#rotate-tile'),
 	terrainRotate: document.querySelector('#rotate-terrain'),
+	terrainMirror: document.querySelector('#mirror-terrain'),
 	redo: document.querySelector('#redo-tile'),
 	forceEnd: document.querySelector('#force-end'),
 	redraw: document.querySelector('#redraw-tile'),
@@ -65,6 +67,7 @@ const el = {
 	deck: document.querySelector('#deck-select'),
 	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
+	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
 	startDeck: document.querySelector('#start-deck'),
 };
@@ -98,6 +101,7 @@ view = new BoardView(el.board, {
 		tileDragging = true;
 		updateTileDrag(event);
 	},
+	onPreviewPatternCycle: () => cycleProvisionalPattern(),
 	onSelect: (tile) => {
 		if (engine.state.phase !== 'placeTile') return;
 		provisional = tile;
@@ -306,13 +310,13 @@ function alternatePlacement() {
 			Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) <
 				1e-4 && Math.abs(Math.abs(candidate.rotation - provisional.rotation) - Math.PI) < 1e-4
 	);
-	return alternatives.find((candidate) => candidate.terrainPattern === provisional.terrainPattern) || alternatives[0] || null;
+	return alternatives.find((candidate) => candidate.terrainPattern === provisional.terrainPattern && Boolean(candidate.mirrored) === Boolean(provisional.mirrored)) || null;
 }
 function sameCandidateGeometry(one, two) {
 	const full = Math.PI * 2;
 	const difference = ((one.rotation - two.rotation + Math.PI) % full + full) % full - Math.PI;
 	return one.shape === two.shape
-		&& Math.hypot(one.centerX - two.centerX, one.centerY - two.centerY) < 1e-4
+		&& Math.hypot(one.centerX - two.centerX, one.centerY - two.centerY) < 1e-3
 		&& Math.abs(difference) < 1e-4;
 }
 function terrainStateSignature(tile) {
@@ -331,10 +335,43 @@ function terrainAlternatePlacement() {
 	const currentSignature = terrainStateSignature(provisional);
 	const variants = allCandidates().filter(
 		(candidate) => sameCandidateGeometry(candidate, provisional)
+			&& Boolean(candidate.mirrored) === Boolean(provisional.mirrored)
 			&& terrainStateSignature(candidate) !== currentSignature,
 	);
 	if (!variants.length) return null;
 	return variants[0];
+}
+function terrainMirrorAlternatePlacement() {
+	if (!provisional) return null;
+	const variants = allCandidates().filter(
+		(candidate) => sameCandidateGeometry(candidate, provisional)
+			&& Boolean(candidate.mirrored) !== Boolean(provisional.mirrored),
+	);
+	// まず現在の地形回転を保つ反転を選び、存在しない場合でも「反転を含む」
+	// 合法状態があればボタンを出す。後者は反転と180度回転の組合せだけが
+	// 合法になるケース（city-three-connected 等）を取りこぼさないため。
+	return variants.find((candidate) => (candidate.terrainPattern || 'normal') === (provisional.terrainPattern || 'normal'))
+		|| variants[0]
+		|| null;
+}
+function provisionalPatternVariants() {
+	if (!provisional) return [];
+	// 同じ盤面上の中心を共有する候補には、物理的な180度回転、地形の180度回転、
+	// 左右反転とその組合せが含まれる。候補生成済みの合法状態だけを巡回する。
+	return allCandidates().filter(
+		(candidate) => Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) < 1e-3,
+	);
+}
+function cycleProvisionalPattern() {
+	const variants = provisionalPatternVariants();
+	if (variants.length < 2) return;
+	const current = variants.findIndex((candidate) =>
+		sameCandidateGeometry(candidate, provisional)
+		&& (candidate.terrainPattern || 'normal') === (provisional.terrainPattern || 'normal')
+		&& Boolean(candidate.mirrored) === Boolean(provisional.mirrored),
+	);
+	provisional = variants[(current + 1 + variants.length) % variants.length];
+	render();
 }
 function renderMeepleOptions() {
 	el.options.replaceChildren();
@@ -417,6 +454,7 @@ function renderPlacementActions() {
 	el.placementActions.classList.remove('hidden');
 	el.rotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !alternatePlacement());
 	el.terrainRotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !terrainAlternatePlacement());
+	el.terrainMirror.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !terrainMirrorAlternatePlacement());
 	el.confirm.classList.toggle('hidden', engine.state.phase !== 'placeTile');
 	el.skip.classList.toggle('hidden', engine.state.phase !== 'placeMeeple');
 	el.confirm.disabled = !provisional;
@@ -450,7 +488,7 @@ function render() {
 	el.redraw.textContent = noRegular ? '↺ 通常候補なし：引き直し' : '↺ 引き直し（1回）';
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
 	el.mirror.disabled = searchPending || state.phase !== 'placeTile' || player.mirrorUsed || Boolean(provisional);
-	el.mirror.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
+	el.mirror.classList.toggle('hidden', engine.rules.allowTerrainMirror || state.phase !== 'placeTile' || Boolean(provisional));
 	el.forceEnd.disabled = state.finished;
 	view.options.placed = state.board.tiles;
 	view.options.candidates = state.phase === 'placeTile' ? allCandidates() : [];
@@ -472,6 +510,7 @@ function render() {
 function startSelectedDeck() {
 	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
 	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
+	gameRules.allowTerrainMirror = el.terrainMirrorMode.value === 'unlimited';
 	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules, deferCandidateSearch: el.progressiveFrontier.checked });
 	provisional = null;
 	dragPreview = null;
@@ -575,6 +614,13 @@ el.rotate.onclick = () => {
 };
 el.terrainRotate.onclick = () => {
 	const alternate = terrainAlternatePlacement();
+	if (alternate) {
+		provisional = alternate;
+		render();
+	}
+};
+el.terrainMirror.onclick = () => {
+	const alternate = terrainMirrorAlternatePlacement();
 	if (alternate) {
 		provisional = alternate;
 		render();

@@ -7,7 +7,7 @@ import { verticesFor } from "./Tile.js";
 import { createPlayer } from "./Player.js";
 
 export class GameEngine {
-  constructor({ playerCount=2, meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, deferCandidateSearch=false }={}) { this.random=random; this.deckType=deckType; this.rules={allowVerticalMatchingPattern:rules.allowVerticalMatchingPattern ?? true,allowTerrainHalfTurn:rules.allowTerrainHalfTurn ?? true}; this.deferCandidateSearch=deferCandidateSearch; this._candidateGroups=null; this._structuralFrontier=null; this._previousStructuralFrontier=null; this._structuralChangedTile=null; this._changedTileAlreadyVirtual=false; const players=Array.from({length:playerCount},(_,index)=>createPlayer({id:`p${index+1}`,name:`Player ${index+1}`,meeples})); const deck=shuffle(createPrototypeDeck(random, deckType),random); this.tileOptions=[...deck.map((tile)=>structuredClone(tile)), ...deck.map((tile)=>mirrorTile(tile))]; this.state=createGameState({players,deck}); this.state.board=new Board(side); this.fillabilityCache=new Map(); this.fieldScoring=fieldScoring; this.start(); }
+  constructor({ playerCount=2, meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, deferCandidateSearch=false }={}) { this.random=random; this.deckType=deckType; this.rules={allowVerticalMatchingPattern:rules.allowVerticalMatchingPattern ?? true,allowTerrainHalfTurn:rules.allowTerrainHalfTurn ?? true,allowTerrainMirror:rules.allowTerrainMirror ?? false}; this.deferCandidateSearch=deferCandidateSearch; this._candidateGroups=null; this._structuralFrontier=null; this._previousStructuralFrontier=null; this._structuralChangedTile=null; this._changedTileAlreadyVirtual=false; const players=Array.from({length:playerCount},(_,index)=>createPlayer({id:`p${index+1}`,name:`Player ${index+1}`,meeples})); const deck=shuffle(createPrototypeDeck(random, deckType),random); this.tileOptions=[...deck.map((tile)=>structuredClone(tile)), ...deck.map((tile)=>mirrorTile(tile))]; this.state=createGameState({players,deck}); this.state.board=new Board(side); this.fillabilityCache=new Map(); this.fieldScoring=fieldScoring; this.start(); }
   start() { const start=this.state.deck.pop(); start.centerX=0;start.centerY=0;start.rotation=0;initializeStartTilePatterns(start,this.rules.allowVerticalMatchingPattern);this.state.board.add(start);this.fillabilityCache=createFillabilityCache(this.state.board,this.tileOptions);this.nextTurn(); }
   get activePlayer() { return this.state.players[this.state.turn]; }
   structuralFrontier() {
@@ -49,7 +49,7 @@ export class GameEngine {
 	if (resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn)) this._candidateGroups=null;
     if(this._candidateGroups) return this._candidateGroups;
     const frontier=this.structuralFrontier(), forced=frontier.forced;
-	const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn})
+	const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,allowTerrainMirror:this.rules.allowTerrainMirror})
       .filter((candidate)=>!conflictsWithForcedPlacement(candidate, forced, this.state.board.side));
     return this._candidateGroups={regular,forced,unresolved:frontier.unresolved};
   }
@@ -59,7 +59,7 @@ export class GameEngine {
       if (resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn)) this._candidateGroups=null;
       if (this._candidateGroups) return this._candidateGroups;
       const frontier = await this.structuralFrontierProgressively({ onForced, yieldControl });
-      const regular = placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn})
+      const regular = placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,allowTerrainMirror:this.rules.allowTerrainMirror})
         .filter((candidate)=>!conflictsWithForcedPlacement(candidate, frontier.forced, this.state.board.side));
       if (regular.length) return this._candidateGroups={regular,forced:frontier.forced,unresolved:frontier.unresolved};
       this.state.discarded.push(this.state.currentTile);
@@ -87,14 +87,14 @@ export class GameEngine {
   }
   mirrorCurrentTile() {
     if (this.state.phase !== "placeTile") throw new Error("タイル配置前にだけ反転できます。");
-    if (this.activePlayer.mirrorUsed) throw new Error("反転は各プレイヤー1回までです。");
+    if (!this.rules.allowTerrainMirror && this.activePlayer.mirrorUsed) throw new Error("反転は各プレイヤー1回までです。");
     if (!this.state.currentTile) throw new Error("反転するタイルがありません。");
     this.state.currentTile = mirrorTile(this.state.currentTile);
     // 左右反転は地形カードの変換であり、辺記号の通常／180度パターンを
     // 片方へ固定してはならない。手札として再び両方を候補に戻す。
 	resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn);
     this._candidateGroups=null;
-    this.activePlayer.mirrorUsed = true;
+    if (!this.rules.allowTerrainMirror) this.activePlayer.mirrorUsed = true;
   }
   collectVertexChips(tile) {
     const player = this.activePlayer;
@@ -143,7 +143,8 @@ function resetUnplacedPlacementPatterns(tile, allowVerticalMatchingPattern, allo
 }
 function samePlacement(left,right) {
   return sameGeometry(left,right)
-		&& (left.terrainPattern||"normal")===(right.terrainPattern||"normal");
+    && (left.terrainPattern||"normal")===(right.terrainPattern||"normal")
+    && Boolean(left.mirrored)===Boolean(right.mirrored);
 }
 function sameGeometry(left,right) {
   return left.shape===right.shape

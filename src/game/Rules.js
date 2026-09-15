@@ -1,5 +1,6 @@
 import { Board } from './Board.js';
 import { edgeMatchFor, edgeMatchesFor, edgeNames, edgeSymbolsMatch, edgeVertexPairs, edgesFor, halfTurnTerrainTile, localVertices, matchingPatterns, verticesFor } from './Tile.js';
+import { mirrorTile } from './TileSet.js';
 
 const EPSILON = 1e-5;
 const samePoint = (a, b) => Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON;
@@ -31,8 +32,8 @@ const FORCED_VERTEX_TYPE_HINTS = new Map([
 ]);
 
 // 地形、辺記号、頂点型、絶対禁則をすべて満たす通常候補だけを返す。
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true } = {}) {
-	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn };
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false } = {}) {
+	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn, allowTerrainMirror };
 	const candidates = matchingPlacementCandidates(board, rawTile, targets, options);
 	if (!tileOptions.length && !fillabilityCache) return candidates;
 	return candidates.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
@@ -351,7 +352,7 @@ function commitVirtualTile(board, candidate, serial) {
 }
 function matchingPlacementCandidates(board, rawTile, targets, options) {
 	const results = new Map();
-	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn))
+	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn, options.allowTerrainMirror))
 		for (const base of terrainPlacementCandidates(board, terrainTile, targets)) {
 			const candidate = resolveMatchingPatterns(board, base, options);
 			if (candidate) results.set(placementKey(candidate), candidate);
@@ -361,7 +362,7 @@ function matchingPlacementCandidates(board, rawTile, targets, options) {
 
 // 手札は通常向きの地形データを保持し、候補生成時だけ独立した地形パターンを
 // 展開する。辺記号の `matchingPattern` はここでは触らない。
-function terrainPatternVariants(rawTile, allowTerrainHalfTurn) {
+function terrainPatternVariants(rawTile, allowTerrainHalfTurn, allowTerrainMirror) {
 	const allowed = allowTerrainHalfTurn ? ['normal', 'halfTurn'] : ['normal'];
 	// `terrainPatternOptions` がない生のタイル定義は、開始前設定で許す全状態を
 	// 持つものとして扱う。配置済みのタイルをここへ渡す用途はない。
@@ -369,10 +370,13 @@ function terrainPatternVariants(rawTile, allowTerrainHalfTurn) {
 		? rawTile.terrainPatternOptions
 		: allowed;
 	const patterns = requested.filter((pattern) => allowed.includes(pattern));
-	return patterns.map((pattern) => {
+	const rotations = patterns.map((pattern) => {
 		if (pattern === 'halfTurn') return halfTurnTerrainTile(rawTile);
 		return { ...rawTile, terrainPattern: 'normal', terrainPatternOptions: ['normal'] };
 	});
+	// 左右反転は地形・特徴領域だけの別状態として、180度回転と直積で評価する。
+	// rawTile 自体が反転済みでも mirrorTile() は元向きへ戻るため、常に両状態が揃う。
+	return allowTerrainMirror ? [...rotations, ...rotations.map((tile) => mirrorTile(tile))] : rotations;
 }
 
 function terrainPlacementCandidates(board, rawTile, targets) {
@@ -454,7 +458,7 @@ function freeEdgeKey(edge) {
 	return [pointKey(edge.a), pointKey(edge.b)].sort().join('|');
 }
 function placementKey(tile) {
-	return `${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(tile.rotation / EPSILON)}:${tile.terrainPattern || 'normal'}`;
+	return `${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(tile.rotation / EPSILON)}:${tile.terrainPattern || 'normal'}:${tile.mirrored ? 'mirror' : 'normal'}`;
 }
 
 // ルール2: 隣接辺は alpha/beta が一致し、convex/concave が反対のときだけ接続できる。
