@@ -3,43 +3,44 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Penrosanne — タイル一覧・デバッグ</title>
+		<title data-i18n="page.galleryTitle">Penrosanne — タイル一覧・デバッグ</title>
 		<link rel="stylesheet" href="styles.css" />
 	</head>
 	<body>
 		<main class="app-shell">
 			<header class="topbar">
-				<a class="brand" href="index.html" aria-label="ゲーム画面へ戻る"
+				<a class="brand" href="index.html" data-i18n-aria-label="nav.game" aria-label="ゲーム画面へ戻る"
 					>PENROSANNE <span>tile debug</span></a
 				>
-				<div class="status"><i></i> タイル定義・アンカー確認</div>
-				<a class="topbar-link" href="index.html">ゲームへ戻る</a>
+				<div class="status"><i></i> <span data-i18n="status.gallery">タイル定義・アンカー確認</span></div>
+				<a class="topbar-link" href="index.html" data-i18n="nav.game">ゲームへ戻る</a>
+				<label class="language-switch"><span data-i18n="language.label">表示言語</span><select id="language-select" data-i18n-aria-label="language.label" aria-label="表示言語"><option value="ja" data-i18n="language.ja">日本語</option><option value="en" data-i18n="language.en">English</option></select></label>
 			</header>
 
 			<section class="tile-gallery-page" aria-labelledby="gallery-heading">
 				<div class="tile-gallery-toolbar panel">
 					<div>
-						<p class="eyebrow">DEBUG TILE CATALOG</p>
-						<h1 id="gallery-heading">タイル一覧</h1>
-						<p class="small-note">各アンカーには、配置時と同じ直立／寝そべりミープルを表示します。アンカーへカーソルを合わせると、ゲーム画面と同じ領域だけを着色します。位置調整モードではミープルをドラッグして、現在のテーマ用アンカーを一時調整できます。</p>
+						<p class="eyebrow" data-i18n="section.catalog">DEBUG TILE CATALOG</p>
+						<h1 id="gallery-heading" data-i18n="gallery.heading">タイル一覧</h1>
+						<p class="small-note" data-i18n="gallery.note">各アンカーには、配置時と同じ直立／寝そべりミープルを表示します。アンカーへカーソルを合わせると、ゲーム画面と同じ領域だけを着色します。位置調整モードではミープルをドラッグして、現在のテーマ用アンカーを一時調整できます。</p>
 					</div>
-					<label class="gallery-theme-label">タイルテーマ
+					<label class="gallery-theme-label"><span data-i18n="settings.theme">タイルテーマ</span>
 						<select id="gallery-theme-select">
-							<option value="none">テーマなし（デバッグ）</option>
-							<option value="meadow" selected>草原</option>
-							<option value="cyber">サイバー</option>
+							<option value="none" data-i18n="settings.noTheme">テーマなし（デバッグ）</option>
+							<option value="meadow" selected data-i18n="settings.meadow">草原</option>
+							<option value="cyber" data-i18n="settings.cyber">サイバー</option>
 						</select>
 					</label>
-					<label class="gallery-theme-label">表示するデッキ
+					<label class="gallery-theme-label"><span data-i18n="gallery.deck">表示するデッキ</span>
 						<select id="gallery-deck-select" aria-label="表示するデッキ"></select>
 					</label>
 					<div class="gallery-anchor-tools">
-						<label class="anchor-edit-toggle"><input id="anchor-edit-toggle" type="checkbox" /> アンカー位置を調整</label>
-						<button id="copy-anchor-definitions" type="button">現在テーマの全アンカーをコピー</button>
+						<label class="anchor-edit-toggle"><input id="anchor-edit-toggle" type="checkbox" /> <span data-i18n="gallery.adjustAnchors">アンカー位置を調整</span></label>
+						<button id="copy-anchor-definitions" type="button" data-i18n="gallery.copyAnchors">現在テーマの全アンカーをコピー</button>
 					</div>
 					<div class="gallery-deck-tools">
-						<label class="anchor-edit-toggle"><input id="deck-adjust-toggle" type="checkbox" /> デッキを調整</label>
-						<button id="copy-deck-definitions" type="button">調整後のデッキ定義をコピー</button>
+						<label class="anchor-edit-toggle"><input id="deck-adjust-toggle" type="checkbox" /> <span data-i18n="gallery.adjustDeck">デッキを調整</span></label>
+						<button id="copy-deck-definitions" type="button" data-i18n="gallery.copyDeck">調整後のデッキ定義をコピー</button>
 						<p id="deck-adjust-status" class="small-note"></p>
 					</div>
 				</div>

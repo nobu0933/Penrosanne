@@ -63,9 +63,11 @@ export class BoardView {
 	bind() {
 		window.addEventListener('resize', () => {
 			this.resize();
+			if (this.replayTiles) this.fitTiles(this.replayTiles);
 			this.render();
 		});
 		this.canvas.addEventListener('pointerdown', (event) => {
+			if (this.interactionLocked) return;
 			if (event.pointerType === 'touch') {
 				this.touchPoints.set(event.pointerId, this.screenPoint(event));
 				if (this.touchPoints.size >= 2 && this.options.allowCameraControls !== false) {
@@ -107,6 +109,7 @@ export class BoardView {
 			this.canvas.setPointerCapture(event.pointerId);
 		});
 		this.canvas.addEventListener('pointermove', (event) => {
+			if (this.interactionLocked) return;
 			if (event.pointerType === 'touch' && this.touchPoints.has(event.pointerId)) {
 				this.touchPoints.set(event.pointerId, this.screenPoint(event));
 				if (this.pinch) {
@@ -148,6 +151,7 @@ export class BoardView {
 			}
 		});
 		this.canvas.addEventListener('pointerup', (event) => {
+			if (this.interactionLocked) return;
 			if (this.finishPinchPointer(event)) return;
 			if (event.button !== 0) return;
 			if (this.markerDrag) {
@@ -165,6 +169,7 @@ export class BoardView {
 			this.drag = null;
 		});
 		this.canvas.addEventListener('contextmenu', (event) => {
+			if (this.interactionLocked) { event.preventDefault(); return; }
 			if (!this.previewTile || !this.options.onPreviewPatternCycle) return;
 			const world = this.worldPoint(this.screenPoint(event));
 			if (!this.pointIsInTile(this.previewTile, world)) return;
@@ -174,6 +179,7 @@ export class BoardView {
 		this.canvas.addEventListener(
 			'wheel',
 			(event) => {
+				if (this.interactionLocked) { event.preventDefault(); return; }
 				if (this.options.allowCameraControls === false) return;
 				event.preventDefault();
 				const scale = event.deltaY < 0 ? 1.1 : 0.9;
@@ -225,9 +231,18 @@ export class BoardView {
 		this.camera.y = screen.y - this.height / 2 - world.y * zoom;
 	}
 	reset() {
+		if (this.interactionLocked) return;
 		this.camera = { x: 0, y: 0, zoom: 1 };
 		this.selected = null;
 		this.render();
+	}
+	fitTiles(tiles) {
+		const points = tiles.flatMap((tile) => Object.values(verticesFor(tile, this.options.side)));
+		if (!points.length) return;
+		const xs = points.map((p) => p.x), ys = points.map((p) => p.y);
+		const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
+		const zoom = Math.min(1, Math.max(1, this.width - 80) / Math.max(1, right - left), Math.max(1, this.height - 80) / Math.max(1, bottom - top));
+		this.zoomAt({ x: (left + right) / 2, y: (top + bottom) / 2 }, { x: this.width / 2, y: this.height / 2 }, zoom);
 	}
 	screenPoint(event) {
 		const rect = this.canvas.getBoundingClientRect();
@@ -288,7 +303,24 @@ export class BoardView {
 		ctx.save();
 		ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
 		ctx.scale(this.camera.zoom, this.camera.zoom);
-		this.options.placed.forEach((tile) => this.drawTile(ctx, tile, false));
+		this.options.placed.forEach((tile, index) => {
+			ctx.save();
+			if (this.historyEntry && index >= this.historyEntry.tileCount) ctx.globalAlpha = .18;
+			this.drawTile(ctx, tile, false);
+			if (tile.id === this.historyEntry?.tileId) {
+				const points = Object.values(verticesFor(tile, this.options.side));
+				ctx.beginPath();
+				points.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+				ctx.closePath();
+				ctx.strokeStyle = this.historyColor;
+				ctx.lineWidth = 5;
+				ctx.stroke();
+				ctx.globalAlpha = .18;
+				ctx.fillStyle = this.historyColor;
+				ctx.fill();
+			}
+			ctx.restore();
+		});
 		if (this.candidatesVisible)
 			(this.options.structuralCandidates || []).forEach((tile) => this.drawStructuralOutline(ctx, tile));
 		if (this.candidatesVisible)
@@ -331,6 +363,19 @@ export class BoardView {
 			this.drawFeatures(ctx, tile, points);
 			if (this.options.showVertices())
 				this.drawVertices(ctx, points);
+			// 仮置きだけは、候補の通常色とは別に手番プレイヤーの色で外周を示す。
+			if (preview && this.previewOutlineColor) {
+				ctx.beginPath();
+				ids.forEach((id, index) => {
+					const point = points[id];
+					index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
+				});
+				ctx.closePath();
+				ctx.strokeStyle = this.previewOutlineColor;
+				ctx.lineWidth = 5;
+				ctx.lineJoin = 'round';
+				ctx.stroke();
+			}
 		} else {
 			ctx.fillStyle = candidateColor;
 			ctx.font = '11px DM Mono';
@@ -582,7 +627,15 @@ export class BoardView {
 			const permanent = marker.option.type === 'field';
 			// 配置候補もミープルSVGだけを表示する。丸・四角の補助記号は使わない。
 			const size = (permanent ? 21 : 23) * (this.options.meepleScale ?? 1);
-			this.drawMeepleIcon(ctx, meepleKindForFeature(marker.option.type), marker.x, marker.y, size, size, '#0c736d');
+			this.drawMeepleIcon(
+				ctx,
+				meepleKindForFeature(marker.option.type),
+				marker.x,
+				marker.y,
+				size,
+				size,
+				this.featureMarkerColor || '#0c736d',
+			);
 			ctx.restore();
 		}
 	}
@@ -627,6 +680,7 @@ export class BoardView {
 	drawMeeples(ctx) {
 		for (const meeple of [...this.meeples, ...this.staticMeeples]) {
 			ctx.save();
+			ctx.globalAlpha *= meeple.opacity ?? 1;
 			const highlighted = meeple.playerIndex === this.highlightPlayerIndex;
 			const kind = meepleKindForFeature(meeple.option?.type);
 			// 各アセットは56×56の正方形。寝そべり／直立の見た目の違いは画像内の

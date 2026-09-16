@@ -3521,6 +3521,8 @@ const STANDARD_DEFINITIONS = [
 	['monastery-field', 1, 'fat'],
 	['monastery-road-end', 1, 'thin'],
 	['monastery-road-end', 1, 'fat'],
+	['city-road-end-third', 1, 'thin'],
+	['city-road-end-third', 2, 'fat'],
 	['city-opposite-connected-road-second-end', 1, 'thin'],
 	['city-opposite-connected-road-second-end', 2, 'fat'],
 	['monastery-two-road-ends', 1, 'thin'],

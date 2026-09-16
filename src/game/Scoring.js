@@ -54,7 +54,9 @@ function tileAngleAt(board, tile, point) {
 function samePoint(a, b) { return Math.abs(a.x - b.x) < EPSILON && Math.abs(a.y - b.y) < EPSILON; }
 
 export function scoreFeature(board, tile, type, index) {
-  if (type === "monastery") return monasteryNeighbors(board,tile).count;
+  // 修道院は周囲のユニークなタイルに加え、修道院タイル自身も1枚として数える。
+  // 完成時・終局時の未完成得点はいずれもこの共通の式を使う。
+  if (type === "monastery") return monasteryNeighbors(board,tile).count + 1;
   const component=board.component(tile,type,index), uniqueTiles=new Map(component.features.map(({tile:featureTile})=>[featureTile.id,featureTile]));
   if (type === "city") return (uniqueTiles.size + [...uniqueTiles.values()].filter((featureTile)=>featureTile.hasCrest).length) * (isComplete(board,tile,type,index) ? 2 : 1);
   if (type === "road") return uniqueTiles.size;

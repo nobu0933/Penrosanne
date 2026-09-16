@@ -3,22 +3,23 @@
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Penrosanne — 描画プロトタイプ</title>
+		<title data-i18n="page.gameTitle">Penrosanne — 描画プロトタイプ</title>
 		<link rel="stylesheet" href="styles.css" />
 	</head>
 	<body>
 		<main class="app-shell">
 			<header class="topbar">
-				<a class="brand" href="#" aria-label="Penrosanne ホーム"
+				<a class="brand" href="#" data-i18n-aria-label="nav.home" aria-label="Penrosanne ホーム"
 					>PENROSANNE <span>prototype</span></a
 				>
-				<div class="status"><i></i> 描画・操作プロトタイプ</div>
-				<a class="topbar-link" href="tile-gallery.html">タイル一覧・デバッグ</a>
+				<div class="status"><i></i> <span data-i18n="status.game">描画・操作プロトタイプ</span></div>
+				<a class="topbar-link" href="tile-gallery.html" data-i18n="nav.gallery">タイル一覧・デバッグ</a>
+				<label class="language-switch"><span data-i18n="language.label">表示言語</span><select id="language-select" data-i18n-aria-label="language.label" aria-label="表示言語"><option value="ja" data-i18n="language.ja">日本語</option><option value="en" data-i18n="language.en">English</option></select></label>
 				<button
 					id="reset-view"
 					class="icon-button"
-					title="表示をリセット"
-					aria-label="表示をリセット"
+					data-i18n-title="nav.resetView" title="表示をリセット"
+					data-i18n-aria-label="nav.resetView" aria-label="表示をリセット"
 				>
 					◎
 				</button>
@@ -27,42 +28,42 @@
 			<section class="workspace">
 				<aside class="left-panel panel">
 					<p id="active-player-label" class="eyebrow">PLAYER 01</p>
-					<h1 id="turn-heading">あなたの手番</h1>
-					<div class="score-row"><span>確定得点</span><strong>12</strong></div>
+					<h1 id="turn-heading"></h1>
+					<div class="score-row"><span data-i18n="player.score">確定得点</span><strong>12</strong></div>
 					<div class="meeple-row">
-						<span>残りミープル</span>
-						<div id="meeple-count" class="meeples" aria-label="残りミープル">● ● ● ● ● ● ●</div>
+						<span data-i18n="player.meeples">残りミープル</span>
+						<div id="meeple-count" class="meeples" data-i18n-aria-label="player.meeples" aria-label="残りミープル">● ● ● ● ● ● ●</div>
 					</div>
 					<hr />
-					<p class="eyebrow">GAME DECK</p>
-					<label class="deck-picker" for="deck-select">山札
+					<p class="eyebrow" data-i18n="section.gameDeck">GAME DECK</p>
+					<label class="deck-picker" for="deck-select"><span data-i18n="deck.select">山札</span>
 						<select id="deck-select" aria-label="使用する山札"></select>
 					</label>
-					<label class="deck-picker" for="matching-pattern-mode-select">辺記号パターン
+					<label class="deck-picker" for="matching-pattern-mode-select"><span data-i18n="deck.matchingPattern">辺記号パターン</span>
 						<select id="matching-pattern-mode-select" aria-label="辺記号パターンの判定方法">
-							<option value="both">通常・180度回転を判定</option>
-							<option value="normal-only">通常のみを判定</option>
+							<option value="both" data-i18n="deck.both">通常・180度回転を判定</option>
+							<option value="normal-only" data-i18n="deck.normalOnly">通常のみを判定</option>
 						</select>
 					</label>
-					<label class="deck-picker" for="terrain-pattern-mode-select">地形パターン
+					<label class="deck-picker" for="terrain-pattern-mode-select"><span data-i18n="deck.terrainPattern">地形パターン</span>
 						<select id="terrain-pattern-mode-select" aria-label="地形パターンの判定方法">
-							<option value="both">通常・180度回転を判定</option>
-							<option value="normal-only">通常のみを判定</option>
+							<option value="both" data-i18n="deck.both">通常・180度回転を判定</option>
+							<option value="normal-only" data-i18n="deck.normalOnly">通常のみを判定</option>
 						</select>
 					</label>
-					<label class="deck-picker" for="terrain-mirror-mode-select">地形の左右反転
+					<label class="deck-picker" for="terrain-mirror-mode-select"><span data-i18n="deck.terrainMirror">地形の左右反転</span>
 						<select id="terrain-mirror-mode-select" aria-label="地形の左右反転ルール">
-							<option value="once">各プレイヤー1回</option>
-							<option value="unlimited" selected>何回でも判定・使用</option>
+							<option value="once" data-i18n="deck.once">各プレイヤー1回</option>
+							<option value="unlimited" selected data-i18n="deck.unlimited">何回でも判定・使用</option>
 						</select>
 					</label>
-					<button id="start-deck" class="primary">この山札で新しいゲーム</button>
-					<p class="eyebrow">CURRENT TILE</p>
+					<button id="start-deck" class="primary" data-i18n="deck.start">この山札で新しいゲーム</button>
+					<p class="eyebrow" data-i18n="section.currentTile">CURRENT TILE</p>
 					<div class="current-tile-wrap">
-						<canvas id="current-tile" width="220" height="180" aria-label="現在のタイル"></canvas>
-						<button id="redo-tile" class="primary hidden">↩ やり直す</button>
-						<button id="redraw-tile">↺ 引き直し</button>
-						<button id="mirror-tile">⇋ 地形を反転（1回）</button>
+						<canvas id="current-tile" width="220" height="180" data-i18n-aria-label="tile.current" aria-label="現在のタイル"></canvas>
+						<button id="redo-tile" class="primary hidden" data-i18n="tile.redo">↩ やり直す</button>
+						<button id="redraw-tile" data-i18n="tile.redraw">↺ 引き直し</button>
+						<button id="mirror-tile" data-i18n="tile.mirrorOnce">⇋ 地形を反転（1回）</button>
 					</div>
 					<p id="tile-label" class="tile-label"></p>
 					<div id="meeple-options" class="meeple-options" aria-live="polite"></div>
@@ -71,64 +72,70 @@
 				<section class="board-area">
 					<div class="board-heading">
 						<div>
-							<p class="eyebrow">BOARD</p>
-							<h2>ひし形の谷</h2>
+							<p class="eyebrow" data-i18n="section.board">BOARD</p>
+							<h2 data-i18n="board.title">ひし形の谷</h2>
 						</div>
 						<div class="legend">
-							<span><b class="confirmed"></b>確定配置</span>
-							<span><b class="regular"></b>このタイルを配置可能</span>
+							<span><b class="confirmed"></b><span data-i18n="board.confirmed">確定配置</span></span>
+							<span><b class="regular"></b><span data-i18n="board.candidate">このタイルを配置可能</span></span>
 						</div>
 					</div>
 					<div id="board-frame" class="board-frame">
-						<canvas id="board" aria-label="ゲーム盤面"></canvas>
+						<canvas id="board" data-i18n-aria-label="board.canvas" aria-label="ゲーム盤面"></canvas>
 						<div id="placement-actions" class="placement-actions hidden">
-							<button id="rotate-tile" title="180度回転" aria-label="180度回転">↻</button>
-							<button id="rotate-terrain" title="地形を180度回転" aria-label="地形を180度回転">地形↻</button>
-							<button id="mirror-terrain" title="地形を左右反転" aria-label="地形を左右反転">⇋</button>
-							<button id="confirm-placement" class="primary" title="配置を確定" aria-label="配置を確定">✓</button>
-							<button id="skip-meeple" class="primary" title="ミープルを置かない" aria-label="ミープルを置かない">→</button>
+							<button id="rotate-tile" data-i18n-title="board.rotate" data-i18n-aria-label="board.rotate" title="180度回転" aria-label="180度回転">↻</button>
+							<button id="rotate-terrain" data-i18n-title="board.rotateTerrain" data-i18n-aria-label="board.rotateTerrain" title="地形を180度回転" aria-label="地形を180度回転">↻</button>
+							<button id="mirror-terrain" data-i18n-title="board.mirrorTerrain" data-i18n-aria-label="board.mirrorTerrain" title="地形を左右反転" aria-label="地形を左右反転">⇋</button>
+							<button id="confirm-placement" class="primary" data-i18n-title="board.confirm" data-i18n-aria-label="board.confirm" title="配置を確定" aria-label="配置を確定">✓</button>
+							<button id="skip-meeple" class="primary" data-i18n-title="board.skipMeeple" data-i18n-aria-label="board.skipMeeple" title="ミープルを置かない" aria-label="ミープルを置かない">→</button>
 						</div>
 						<div class="board-help">
-							ドラッグで移動　／　ホイール・ピンチで拡大縮小　／　候補をクリックして配置
+							<span data-i18n="board.help">ドラッグで移動　／　ホイール・ピンチで拡大縮小　／　候補をクリックして配置</span>
 						</div>
 					</div>
 					<div class="board-actions">
-						<button id="force-end" title="デバッグ用：ただちに終局得点を計算します">デバッグ：強制終了・採点</button>
+						<button id="force-end" data-i18n="board.forceEnd" data-i18n-title="board.forceEndTitle" title="デバッグ用：ただちに終局得点を計算します">デバッグ：強制終了・採点</button>
 					</div>
+					<section class="play-log-panel" aria-labelledby="play-log-heading">
+						<h3 id="play-log-heading" data-i18n="log.title">プレイログ</h3>
+						<p id="replay-status" role="status" class="hidden"></p>
+						<button id="replay-game" class="hidden" type="button" data-i18n="log.replayButton">もう一度再生</button>
+						<ol id="play-log" class="play-log"></ol>
+					</section>
 				</section>
 
 				<aside class="right-panel panel">
-					<p class="eyebrow">SETTINGS</p>
-					<h2>プロトタイプ設定</h2>
-					<label>タイルテーマ
+					<p class="eyebrow" data-i18n="section.settings">SETTINGS</p>
+					<h2 data-i18n="settings.title">プロトタイプ設定</h2>
+					<label><span data-i18n="settings.theme">タイルテーマ</span>
 						<select id="theme-select">
-							<option value="none">テーマなし（デバッグ）</option>
-							<option value="meadow">草原</option>
-							<option value="cyber">サイバー</option>
+							<option value="none" data-i18n="settings.noTheme">テーマなし（デバッグ）</option>
+							<option value="meadow" data-i18n="settings.meadow">草原</option>
+							<option value="cyber" data-i18n="settings.cyber">サイバー</option>
 						</select>
 					</label>
-					<label>タイル辺長 <output id="side-length">画面高の 1/5</output></label>
+					<label><span data-i18n="settings.side">タイル辺長</span> <output id="side-length" data-i18n="settings.sideValue">画面高の 1/5</output></label>
 					<label class="switch-row"
-						><input id="vertex-toggle" type="checkbox" checked /> 頂点色を表示</label
+						><input id="vertex-toggle" type="checkbox" checked /> <span data-i18n="settings.vertices">頂点色を表示</span></label
 					>
 					<label class="switch-row"
-						><input id="progressive-frontier-toggle" type="checkbox" /> 確定配置をぱらぱら表示</label
+						><input id="progressive-frontier-toggle" type="checkbox" /> <span data-i18n="settings.progressive">確定配置をぱらぱら表示</span></label
 					>
 					<hr />
-					<p class="eyebrow">DECK</p>
+					<p class="eyebrow" data-i18n="section.deck">DECK</p>
 					<div class="deck-stat"><strong id="thin-count">10</strong><span>THIN</span></div>
 					<div class="deck-stat"><strong id="fat-count">11</strong><span>FAT</span></div>
 					<p class="small-note">
-						試作セット。開始タイルはランダム、青赤頂点もランダムに決定されます。
+						<span data-i18n="settings.note">試作セット。開始タイルはランダム、青赤頂点もランダムに決定されます。</span>
 					</p>
 					<hr />
-					<p class="eyebrow">SCORES</p>
+					<p class="eyebrow" data-i18n="section.scores">SCORES</p>
 					<div id="scoreboard" class="scoreboard" aria-live="polite"></div>
 					<div id="final-score-details" class="final-score-details hidden" aria-live="polite"></div>
 					<hr />
-					<p class="eyebrow">SCOPE</p>
+					<p class="eyebrow" data-i18n="section.scope">SCOPE</p>
 					<p class="small-note">
-						草原は終局時、隣接する完成都市1つにつき3点です。四角の候補は草原（終局まで残留）、丸は完成時に回収できる領域です。
+						<span data-i18n="settings.scope">草原は終局時、隣接する完成都市1つにつき3点です。四角の候補は草原（終局まで残留）、丸は完成時に回収できる領域です。</span>
 					</p>
 				</aside>
 			</section>

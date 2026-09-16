@@ -6,6 +6,7 @@ import { markerForFeature } from './ui/FeatureAnchors.js';
 import { MEEPLE_ASSETS, playerColor } from './ui/MeepleAssets.js';
 import { DECK_CONFIGS } from './game/TileSet.js';
 import { structuralPositionKey } from './game/Rules.js';
+import { applyTranslations, bindLanguageSelect, deckText, t } from './ui/i18n.js';
 
 const palette = {
 	field: '#a9c579',
@@ -70,15 +71,23 @@ const el = {
 	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
 	startDeck: document.querySelector('#start-deck'),
+	language: document.querySelector('#language-select'),
+	replayButton: document.querySelector('#replay-game'),
 };
-for (const deck of DECK_CONFIGS) {
-	const option = document.createElement('option');
-	option.value = deck.id;
-	option.textContent = deck.label + ' — ' + deck.description;
-	if (deck.id === engine.deckType) option.selected = true;
-	el.deck.append(option);
+function renderDeckOptions() {
+	const selected = el.deck.value || engine.deckType;
+	el.deck.replaceChildren();
+	for (const deck of DECK_CONFIGS) {
+		const option = document.createElement('option'), text = deckText(deck);
+		option.value = deck.id;
+		option.textContent = `${text.label} — ${text.description}`;
+		option.selected = deck.id === selected;
+		el.deck.append(option);
+	}
 }
+renderDeckOptions();
 let view;
+let historyHover = null, replay = null, replayedEngine = null, replayTimer = null, replayComplete = false, logSignature = '';
 const tileTheme = new TileTheme({
 	onChange: () => {
 		// テーマごとのアンカー上書きもあるため、単なるCanvas再描画ではなく
@@ -292,13 +301,14 @@ function meepleMarkers() {
 		return marker;
 	});
 }
-function placedMeeples() {
-	return Object.entries(engine.state.meeples).map(([reference, playerId]) => {
+function placedMeeples(entries = engine.state.meeples, historical = null) {
+	return Object.entries(entries).map(([reference, playerId]) => {
 		const [tileId, type, index] = reference.split(':');
 		const tile = engine.state.board.getTile(tileId),
 			marker = markerFor(tile, { type, index: Number(index) });
 		return {
 			...marker,
+			opacity: historical && historical[reference] !== playerId ? .18 : 1,
 			playerIndex: engine.state.players.findIndex((player) => player.id === playerId),
 		};
 	});
@@ -357,19 +367,25 @@ function terrainMirrorAlternatePlacement() {
 function provisionalPatternVariants() {
 	if (!provisional) return [];
 	// 同じ盤面上の中心を共有する候補には、物理的な180度回転、地形の180度回転、
-	// 左右反転とその組合せが含まれる。候補生成済みの合法状態だけを巡回する。
-	return allCandidates().filter(
-		(candidate) => Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) < 1e-3,
-	);
+	// 左右反転とその組合せが含まれる。同じ見た目の辺記号パターン差や、
+	// 対称な地形の normal / halfTurn は1状態へ畳み、右クリック1回で
+	// 実際に見えるパターンが変わるようにする。
+	const unique = new Map();
+	for (const candidate of allCandidates()) {
+		if (Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) >= 1e-3) continue;
+		if (!unique.has(patternCycleKey(candidate))) unique.set(patternCycleKey(candidate), candidate);
+	}
+	return [...unique.values()];
+}
+function patternCycleKey(tile) {
+	const full = Math.PI * 2;
+	const rotation = ((tile.rotation || 0) % full + full) % full;
+	return `${Math.round(rotation * 1e5)}:${tile.mirrored ? 'mirror' : 'normal'}:${terrainStateSignature(tile)}`;
 }
 function cycleProvisionalPattern() {
 	const variants = provisionalPatternVariants();
 	if (variants.length < 2) return;
-	const current = variants.findIndex((candidate) =>
-		sameCandidateGeometry(candidate, provisional)
-		&& (candidate.terrainPattern || 'normal') === (provisional.terrainPattern || 'normal')
-		&& Boolean(candidate.mirrored) === Boolean(provisional.mirrored),
-	);
+	const current = variants.findIndex((candidate) => patternCycleKey(candidate) === patternCycleKey(provisional));
 	provisional = variants[(current + 1 + variants.length) % variants.length];
 	render();
 }
@@ -378,7 +394,7 @@ function renderMeepleOptions() {
 	if (engine.state.phase !== 'placeMeeple') return;
 	for (const option of engine.meepleOptions()) {
 		const button = document.createElement('button');
-		button.textContent = `${{ city: '都市', road: '道', field: '草原', monastery: '修道院' }[option.type]} に置く`;
+		button.textContent = t('feature.place', { feature: t(`feature.${option.type}`) });
 		button.onclick = () => placeMeeple(option);
 		el.options.append(button);
 	}
@@ -404,11 +420,11 @@ function renderScores() {
 			meeples = document.createElement('small'),
 			chips = document.createElement('small');
 		row.className = `player-box${!engine.state.finished && index === engine.state.turn ? ' active-player-box' : ''}`;
-		name.textContent = player.name;
+		name.textContent = displayPlayerName(player);
 		score.textContent = player.score;
 		meeples.className = 'player-meeple-count';
-		meeples.append('ミープル ', meepleCounter(player.meeples, index, { compact: true }));
-		chips.textContent = `頂点チップ ${player.vertexChips}`;
+		meeples.append(`${t('player.meeples')} `, meepleCounter(player.meeples, index, { compact: true }));
+		chips.textContent = t('player.chips', { count: player.vertexChips });
 		chips.className = 'chip-counts';
 		row.append(name, score, meeples, chips);
 		row.onpointerenter = () => {
@@ -426,21 +442,24 @@ function renderScores() {
 	el.finalScoreDetails.replaceChildren();
 	el.finalScoreDetails.classList.toggle('hidden', !engine.state.finished);
 	if (!engine.state.finished) return;
-	const labels = { city: '都市', road: '道', monastery: '修道院', field: '草原' };
 	engine.state.players.forEach((player) => {
 		const title = document.createElement('h3'), list = document.createElement('ul'), events = engine.state.scoreEvents.filter((event) => event.playerId === player.id);
-		title.textContent = `${player.name}　合計 ${player.score}点`;
+		title.textContent = t('score.total', { player: displayPlayerName(player), score: player.score });
 		if (!events.length) {
-			const item = document.createElement('li'); item.textContent = '得点なし'; list.append(item);
+			const item = document.createElement('li'); item.textContent = t('score.none'); list.append(item);
 		}
 		events.forEach((event) => {
 			const item = document.createElement('li'), label = document.createElement('span'), points = document.createElement('strong');
-			label.textContent = `${event.reason === 'end' ? '終局' : '完成'}：${labels[event.type]}`;
+			label.textContent = t('score.event', { reason: t(event.reason === 'end' ? 'score.end' : 'score.complete'), feature: t(`feature.${event.type}`) });
 			points.textContent = `+${event.points}`;
 			item.append(label, points); list.append(item);
 		});
 		el.finalScoreDetails.append(title, list);
 	});
+}
+function displayPlayerName(player) {
+	const match = /^Player (\d+)$/.exec(player.name);
+	return match ? t('game.player', { number: match[1] }) : player.name;
 }
 function renderPlacementActions() {
 	const tile = provisional || (engine.state.phase === 'placeMeeple' ? engine.state.currentTile : null);
@@ -461,16 +480,22 @@ function renderPlacementActions() {
 	el.skip.disabled = engine.state.phase !== 'placeMeeple';
 }
 function render() {
+	if (engine.state.finished && replayedEngine !== engine) startReplay();
 	const { state } = engine,
 		player = engine.activePlayer,
 		handTile = state.phase === 'placeTile' ? state.currentTile : null,
 		searchPending = structuralSearchPending && state.phase === 'placeTile';
-	el.activeLabel.textContent = state.finished ? 'GAME OVER' : `PLAYER ${state.turn + 1}`;
+	el.activeLabel.textContent = state.finished ? t('game.over') : t('game.playerShort', { number: state.turn + 1 });
+	const replayStatus = document.querySelector('#replay-status');
+	replayStatus.classList.toggle('hidden', !replay);
+	replayStatus.textContent = replay ? t('log.replay') : '';
+	el.replayButton.classList.toggle('hidden', !state.finished || Boolean(replay) || !replayComplete);
+	el.replayButton.disabled = Boolean(replay);
 	el.heading.textContent = state.finished
-		? '対局終了'
+		? t('game.finished')
 		: state.phase === 'placeMeeple'
-			? 'ミープルを置きますか？'
-			: `${player.name} の手番`;
+			? t('game.placeMeeple')
+			: t('game.turn', { player: displayPlayerName(player) });
 	el.score.textContent = player.score;
 	el.meeples.replaceChildren(meepleCounter(player.meeples, state.turn));
 	el.thin.textContent = state.deck.filter((tile) => tile.shape === 'thin').length;
@@ -478,14 +503,14 @@ function render() {
 	el.tileLabel.textContent = handTile
 		? `${handTile.shape.toUpperCase()} · ${handTile.idPrefix.replaceAll('-', ' ')}`
 		: state.finished
-			? 'すべてのタイルを処理しました'
-			: 'ミープルを配置してください';
+			? t('game.allTilesProcessed')
+			: t('game.placeMeeplePrompt');
 	drawTilePreview(handTile);
 	el.current.classList.toggle('hidden', Boolean(provisional) || state.phase !== 'placeTile');
 	el.redo.classList.toggle('hidden', !provisional);
 	const noRegular = !searchPending && candidates.length === 0;
 	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || (!noRegular && player.redrawUsed) || Boolean(provisional);
-	el.redraw.textContent = noRegular ? '↺ 通常候補なし：引き直し' : '↺ 引き直し（1回）';
+	el.redraw.textContent = t(noRegular ? 'tile.redrawNoCandidate' : 'tile.redraw');
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
 	el.mirror.disabled = searchPending || state.phase !== 'placeTile' || player.mirrorUsed || Boolean(provisional);
 	el.mirror.classList.toggle('hidden', engine.rules.allowTerrainMirror || state.phase !== 'placeTile' || Boolean(provisional));
@@ -499,15 +524,107 @@ function render() {
 		: [];
 	view.candidatesVisible = true;
 	view.previewTile = provisional || dragPreview;
+	// 仮置きの外周と、確定直後のミープル候補を手番プレイヤーの色で示す。
+	// ドラッグ中の自由プレビューは候補として未確定なので縁取りしない。
+	view.previewOutlineColor = provisional ? playerColor(state.turn) : null;
 	view.featureMarkers = meepleMarkers();
+	view.featureMarkerColor = state.phase === 'placeMeeple' ? playerColor(state.turn) : null;
 	view.meeples = placedMeeples();
 	view.highlightPlayerIndex = hoveredPlayerIndex ?? (state.phase === 'placeTile' ? state.turn : null);
 	renderMeepleOptions();
 	renderScores();
+	renderLog();
+	applyHistoryDisplay();
+	el.scores.classList.toggle('hidden', Boolean(replay));
+	el.score.classList.toggle('hidden', Boolean(replay));
+	if (replay) el.finalScoreDetails.classList.add('hidden');
+	el.startDeck.disabled = Boolean(replay);
 	view.render();
 	renderPlacementActions();
 }
+function logText(entry) {
+	const player = engine.state.players.find((p) => p.id === entry.playerId);
+	const actions = [t('log.tile')];
+	if (entry.placedMeeple) actions.push(t('log.meeple', { feature: t(`feature.${entry.placedMeeple.split(':')[1]}`) }));
+	for (const score of entry.scores || []) {
+		const owner = engine.state.players.find((p) => p.id === score.playerId);
+		actions.push(t('log.completed', { feature: t(`feature.${score.type}`), points: score.points }) + (score.playerId !== entry.playerId ? ` (${displayPlayerName(owner)})` : ''));
+	}
+	return `${entry.number}. ${displayPlayerName(player)}: ${actions.join(' / ')}`;
+}
+function renderLog() {
+	const entries = engine.state.turnHistory || [];
+	const signature = `${entries.length}:${t('log.title')}:${Boolean(replay)}`;
+	if (signature === logSignature) return;
+	logSignature = signature;
+	const list = document.querySelector('#play-log');
+	const atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 10;
+	list.replaceChildren();
+	for (const entry of entries) {
+		const row = document.createElement('li'), button = document.createElement('button');
+		button.textContent = logText(entry);
+		button.disabled = Boolean(replay);
+		const show = () => { if (replay) return; historyHover = entry; applyHistoryDisplay(); view.render(); };
+		const hide = () => { historyHover = null; applyHistoryDisplay(); view.render(); };
+		button.onpointerenter = show; button.onpointerleave = hide;
+		button.onfocus = show; button.onblur = hide;
+		row.append(button); list.append(row);
+	}
+	if (atBottom) list.scrollTop = list.scrollHeight;
+}
+function applyHistoryDisplay() {
+	view.historyEntry = historyHover;
+	view.historyColor = historyHover ? playerColor(engine.state.players.findIndex((p) => p.id === historyHover.playerId)) : null;
+	if (replay) {
+		view.options.placed = engine.state.board.tiles.slice(0, replay.tileCount);
+		view.options.candidates = []; view.options.structuralCandidates = [];
+		view.previewTile = null; view.featureMarkers = []; view.hoverMarker = null;
+		view.meeples = placedMeeples(replay.meeples);
+		view.highlightPlayerIndex = null;
+	} else {
+		const current = engine.state.finished ? engine.state.finalMeeples || engine.state.meeples : engine.state.meeples;
+		view.options.placed = engine.state.board.tiles;
+		view.meeples = historyHover
+			? placedMeeples({ ...current, ...historyHover.meeples }, historyHover.meeples)
+			: placedMeeples(current);
+		view.highlightPlayerIndex = historyHover ? null : hoveredPlayerIndex ?? (engine.state.phase === 'placeTile' ? engine.state.turn : null);
+	}
+}
+function startReplay() {
+	if (!engine.state.finished || replay) return;
+	clearTimeout(replayTimer);
+	replayedEngine = engine;
+	replayComplete = false;
+	historyHover = null;
+	tileDragging = false;
+	view.drag = null; view.pinch = null; view.touchPoints.clear();
+	view.interactionLocked = true;
+	view.replayTiles = engine.state.board.tiles;
+	view.fitTiles(view.replayTiles);
+	replay = { tileCount: 1, meeples: {} };
+	const frames = (engine.state.turnHistory || []).flatMap((entry) => [
+		{ tileCount: entry.tileCount, meeples: entry.meeples },
+		{ tileCount: entry.tileCount, meeples: entry.meeplesAfter },
+	]);
+	let index = 0;
+	// 終局演出は操作待ちを作らず、長い対局でも約2.2秒以内に収める。
+	const interval = Math.min(75, 2200 / Math.max(1, frames.length));
+	const advance = () => {
+		if (index < frames.length) replay = frames[index++];
+		else {
+			replay = null; replayTimer = null;
+			replayComplete = true;
+			view.interactionLocked = false; view.replayTiles = null;
+		}
+		render();
+		if (replay) replayTimer = setTimeout(advance, interval);
+	};
+	replayTimer = setTimeout(advance, 120);
+}
 function startSelectedDeck() {
+	if (replay) return;
+	clearTimeout(replayTimer);
+	historyHover = null; replayComplete = false; logSignature = '';
 	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
 	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
 	gameRules.allowTerrainMirror = el.terrainMirrorMode.value === 'unlimited';
@@ -538,6 +655,7 @@ function boardWorldPoint(event) {
 	return view.worldPoint({ x: event.clientX - rect.left, y: event.clientY - rect.top });
 }
 function updateTileDrag(event) {
+	view.previewOutlineColor = null;
 	const world = boardWorldPoint(event);
 	if (!world) {
 		dragPreview = null;
@@ -585,6 +703,12 @@ window.addEventListener('pointerup', (event) => {
 	if (tileDragging) finishTileDrag(event);
 });
 document.querySelector('#reset-view').onclick = () => view.reset();
+bindLanguageSelect(el.language);
+applyTranslations();
+window.addEventListener('penrosanne-language-change', () => {
+	renderDeckOptions();
+	render();
+});
 document.querySelector('#vertex-toggle').onchange = (event) => {
 	showVertices = event.target.checked;
 	view.render();
@@ -601,6 +725,7 @@ el.progressiveFrontier.onchange = () => {
 	render();
 };
 el.startDeck.onclick = startSelectedDeck;
+el.replayButton.onclick = () => { startReplay(); render(); };
 el.redo.onclick = () => {
 	provisional = null;
 	render();

@@ -6,6 +6,7 @@ import {
 	manualAnchorForFeature,
 	markerForFeature,
 } from './ui/FeatureAnchors.js';
+import { applyTranslations, bindLanguageSelect, deckText, t } from './ui/i18n.js';
 
 const side = 96;
 const gallery = document.querySelector('#tile-gallery');
@@ -16,6 +17,7 @@ const copyAnchors = document.querySelector('#copy-anchor-definitions');
 const deckAdjustToggle = document.querySelector('#deck-adjust-toggle');
 const copyDeckDefinitions = document.querySelector('#copy-deck-definitions');
 const deckAdjustStatus = document.querySelector('#deck-adjust-status');
+const languageSelect = document.querySelector('#language-select');
 const views = [];
 const anchorDrafts = new Map();
 let renderQueued = false;
@@ -41,6 +43,12 @@ const catalog = uniqueTiles(createTileCatalog(() => true))
 	.sort((left, right) => manualAnchorOrder(left) - manualAnchorOrder(right));
 addDeckOptions();
 renderCatalog();
+bindLanguageSelect(languageSelect);
+applyTranslations();
+window.addEventListener('penrosanne-language-change', () => {
+	addDeckOptions();
+	renderCatalog();
+});
 themeSelect.addEventListener('change', (event) => {
 	tileTheme.setTheme(event.target.value);
 	renderCatalog();
@@ -79,10 +87,13 @@ deckAdjustToggle.addEventListener('change', (event) => {
 copyDeckDefinitions.addEventListener('click', copyCurrentDeckDefinitions);
 
 function addDeckOptions() {
-	for (const deck of [{ id: 'catalog', label: '全タイル（CATALOG）' }, ...DECK_CONFIGS]) {
+	const selected = deckSelect.value || 'catalog';
+	deckSelect.replaceChildren();
+	for (const deck of [{ id: 'catalog' }, ...DECK_CONFIGS]) {
 		const option = document.createElement('option');
 		option.value = deck.id;
-		option.textContent = deck.label;
+		option.textContent = deck.id === 'catalog' ? t('gallery.catalog') : deckText(deck).label;
+		option.selected = deck.id === selected;
 		deckSelect.append(option);
 	}
 }
@@ -149,7 +160,7 @@ function addTileCard(source) {
 	canvas.className = 'tile-debug-canvas';
 	canvas.width = 330;
 	canvas.height = 230;
-	canvas.setAttribute('aria-label', `${tile.idPrefix} ${tile.shape} のタイル`);
+	canvas.setAttribute('aria-label', t('gallery.tileAria', { tile: tile.idPrefix, shape: tile.shape.toUpperCase() }));
 	canvasWrap.append(canvas);
 	const anchorList = document.createElement('ul');
 	anchorList.className = 'tile-anchor-list';
@@ -236,13 +247,13 @@ function updateDeckAdjustControls() {
 	}
 	copyDeckDefinitions.disabled = !editable;
 	if (!editable) {
-		deckAdjustStatus.textContent = 'CATALOG は参照用です。ゲーム用デッキを選択してください。';
+		deckAdjustStatus.textContent = t('gallery.catalogNotice');
 		return;
 	}
 	const total = [...deckDrafts.get(deckId).values()].reduce((sum, count) => sum + count, 0);
 	deckAdjustStatus.textContent = deckEditMode
-		? `${deckId.toUpperCase()}：${total}枚（左クリック +1／右クリック -1）`
-		: `${deckId.toUpperCase()}：${total}枚`;
+		? t('gallery.deckStatusEdit', { deck: deckId.toUpperCase(), count: total })
+		: t('gallery.deckStatus', { deck: deckId.toUpperCase(), count: total });
 }
 
 function anchorThemeId() {
@@ -300,14 +311,14 @@ function updateAnchorRows(tile, anchorList) {
 async function copyCurrentThemeAnchors() {
 	const theme = anchorThemeId();
 	const text = serializeThemeAnchors(theme);
-	await copyText(text, '✓ 現在のテーマの全アンカーをコピーしました', copyAnchors);
+	await copyText(text, t('gallery.copyAnchorsDone'), copyAnchors);
 }
 
 async function copyCurrentDeckDefinitions() {
 	const deckId = deckSelect.value;
 	if (deckId === 'catalog') return;
 	const text = serializeDeckDefinitions(deckId);
-	await copyText(text, `✓ ${deckId.toUpperCase()} のデッキ定義をコピーしました`, copyDeckDefinitions);
+	await copyText(text, t('gallery.copyDeckDone', { deck: deckId.toUpperCase() }), copyDeckDefinitions);
 }
 
 async function copyText(text, message, button) {
@@ -357,8 +368,9 @@ function formatAnchorList(anchors = []) {
 
 function showCopyResult(message, button = copyAnchors) {
 	const initial = button.textContent;
+	const initialKey = button.dataset.i18n;
 	button.textContent = message;
-	setTimeout(() => { button.textContent = initial; }, 1800);
+	setTimeout(() => { button.textContent = initialKey ? t(initialKey) : initial; }, 1800);
 }
 
 function featureMarkers(tile) {
@@ -387,8 +399,8 @@ function anchorRows(tile) {
 			const manual = manualAnchorForFeature(tile, type, index, anchorThemeId());
 			const marker = markerForFeature(tile, { type, index }, side, anchorThemeId());
 			const suffix = type === 'field'
-				? `小領域 ${tile.fieldScoreGroups?.[index]?.map((region) => `①②③④`[region - 1]).join('') || 'なし'}`
-				: `辺 ${featureEdgeNumbers(tile, type, index).join('・') || 'なし'}`;
+				? t('gallery.fieldSubregions', { regions: tile.fieldScoreGroups?.[index]?.map((region) => `①②③④`[region - 1]).join('') || t('gallery.none') })
+				: t('gallery.edge', { edges: featureEdgeNumbers(tile, type, index).join('・') || t('gallery.none') });
 			rows.push({
 				key: `${type}:${index}`,
 				label: `${featureName(type)} ${index + 1}（${suffix}）`,
@@ -396,17 +408,17 @@ function anchorRows(tile) {
 			});
 		}
 	}
-	if (tile.hasMonastery) rows.push({ key: 'monastery:0', label: '修道院', position: anchorPosition(manualAnchorForFeature(tile, 'monastery', 0, anchorThemeId()), markerForFeature(tile, { type: 'monastery', index: 0 }, side, anchorThemeId())) });
+	if (tile.hasMonastery) rows.push({ key: 'monastery:0', label: t('feature.monastery'), position: anchorPosition(manualAnchorForFeature(tile, 'monastery', 0, anchorThemeId()), markerForFeature(tile, { type: 'monastery', index: 0 }, side, anchorThemeId())) });
 	return rows;
 }
 
 function featureName(type) {
-	return { city: '都市', road: '道', field: '草原' }[type];
+	return t(`feature.${type}`);
 }
 
 function anchorPosition(manual, marker) {
-	if (manual) return `手動：x ${format(manual.x)} / y ${format(manual.y)}`;
-	return `自動：x ${format(marker.x / side)} / y ${format(marker.y / side)}`;
+	if (manual) return t('gallery.manual', { x: format(manual.x), y: format(manual.y) });
+	return t('gallery.auto', { x: format(marker.x / side), y: format(marker.y / side) });
 }
 
 function format(value) {

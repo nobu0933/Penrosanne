@@ -182,9 +182,31 @@ hr {
 	display: grid;
 	place-items: center;
 }
+.play-log-panel { padding: 12px; background: #f7f5ee; }
+.play-log-panel h3 { margin: 0 0 8px; font-size: .85rem; }
+.play-log { max-height: 190px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.play-log button { width: 100%; text-align: left; font-size: .75rem; margin: 2px 0; }
+.play-log button:hover, .play-log button:focus-visible { background: #e3e9da; }
+.language-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: .62rem;
+	color: var(--muted);
+	white-space: nowrap;
+}
+.language-switch select {
+	font: inherit;
+	font-size: .7rem;
+	color: var(--teal);
+	background: #f7f5ee;
+	border: 1px solid #c6cbbb;
+	border-radius: 4px;
+	padding: 3px 5px;
+}
 .current-tile-wrap {
 	position: fixed;
-	right: 28px;
+	left: 28px;
 	bottom: 28px;
 	width: 230px;
 	height: 185px;

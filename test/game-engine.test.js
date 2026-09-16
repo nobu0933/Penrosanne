@@ -995,7 +995,8 @@ test("各プレイヤーは引いた未配置タイルを1回だけ引き直せ�
 });
 
 test("ミラー版は辺・アンカー・草原小領域を左右反転し、山札には入らない", () => {
-  const original = createPrototypeDeck(fixedRandom).find((tile) => tile.idPrefix === "city-road-end-c" && tile.shape === "thin");
+  // 山札の採用カードはユーザーが編集できるため、タイル定義の検証はカタログを使う。
+  const original = createTileCatalog(fixedRandom).find((tile) => tile.idPrefix === "city-road-end-c" && tile.shape === "thin");
   const mirrored = mirrorTile(original);
   assert.equal(mirrored.idPrefix, "city-road-end-c-mirror");
   assert.equal(mirrored.edgeTerrain.DA, original.edgeTerrain.AB);
@@ -1070,7 +1071,8 @@ test("試作山札の全特徴には編集用の明示アンカーがある", ()
 });
 
 test("テーマ画像の名前は種別・形状・領域を短縮表記で含む", () => {
-  const tile = createPrototypeDeck(fixedRandom).find((candidate) => candidate.idPrefix === "city-road-end-c" && candidate.shape === "thin");
+  // テーマ画像は山札の採用状況に依存しないため、カタログから代表タイルを取得する。
+  const tile = createTileCatalog(fixedRandom).find((candidate) => candidate.idPrefix === "city-road-end-c" && candidate.shape === "thin");
   assert.equal(tileAssetFilename(tile, "field", 0), "city-road-end-c_thin_field-134.png");
   assert.equal(tileAssetFilename(tile, "road", 0), "city-road-end-c_thin_road-2.png");
   assert.equal(tileAssetFilename(tile, "city", 0), "city-road-end-c_thin_city-1.png");
@@ -1129,7 +1131,7 @@ test("完成都市は紋章を含めて2倍得点", () => {
   assert.equal(scoreFeature(board, board.getTile("city-test"), "city", 0), 4);
 });
 
-test("修道院は頂点に接する周辺タイル数だけ得点", () => {
+test("修道院は自身を含む頂点に接するタイル数を得点", () => {
   const board = new Board(120);
   const monastery = createTile({ shape:"thin", edgeTerrain:{AB:"F",BC:"F",CD:"F",DA:"F"}, featureGroups:{city:[],road:[],field:[]}, hasMonastery:true }, "monastery");
   board.add(monastery);
@@ -1138,7 +1140,7 @@ test("修道院は頂点に接する周辺タイル数だけ得点", () => {
     const around = createTile({ shape:"thin", edgeTerrain:{AB:"F",BC:"F",CD:"F",DA:"F"}, featureGroups:{city:[],road:[],field:[]} }, `around-${index}`);
     around.centerX = vertex.x - a.x; around.centerY = vertex.y - a.y; board.add(around);
   }
-  assert.equal(scoreFeature(board, board.getTile("monastery"), "monastery", 0), 4);
+  assert.equal(scoreFeature(board, board.getTile("monastery"), "monastery", 0), 5);
 });
 
 test("修道院は4頂点の周囲が360度埋まった場合だけ完成する", () => {
