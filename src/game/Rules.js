@@ -32,11 +32,22 @@ const FORCED_VERTEX_TYPE_HINTS = new Map([
 ]);
 
 // 地形、辺記号、頂点型、絶対禁則をすべて満たす通常候補だけを返す。
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false } = {}) {
-	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn, allowTerrainMirror };
-	const candidates = matchingPlacementCandidates(board, rawTile, targets, options);
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false, ignoreMatchingRules = false } = {}) {
+	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn, allowTerrainMirror, ignoreMatchingRules };
+	const candidates = ignoreMatchingRules
+		? terrainOnlyPlacementCandidates(board, rawTile, targets, options)
+		: matchingPlacementCandidates(board, rawTile, targets, options);
+	if (ignoreMatchingRules) return candidates;
 	if (!tileOptions.length && !fillabilityCache) return candidates;
 	return candidates.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
+}
+
+function terrainOnlyPlacementCandidates(board, rawTile, targets, options) {
+	const results = new Map();
+	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn, options.allowTerrainMirror))
+		for (const candidate of terrainPlacementCandidates(board, terrainTile, targets))
+			results.set(placementKey(candidate), candidate);
+	return [...results.values()];
 }
 
 // 候補区分は通常候補だけである。
@@ -97,17 +108,20 @@ export function structuralPlacementFrontier(
 	};
 }
 
-// UI が `yieldControl` を渡す場合だけ、確定した仮想タイルを一枚ずつ通知して
-// ブラウザへ描画機会を譲る。通常の同期探索は上の関数をそのまま使うため、
-// 順次表示をオフにした際の探索時間にはこの非同期処理の負荷が加わらない。
-export async function structuralPlacementFrontierProgressively(board, options = {}, { onForced = () => {}, yieldControl = () => Promise.resolve() } = {}) {
+// UI側で枚数や経過時間に応じて中断できるよう、追加がない頂点の検査も
+// 1ステップずつ進める。同期探索の処理順・確定結果は変えない。
+export async function structuralPlacementFrontierProgressively(board, options = {}, { onForced = () => {}, yieldControl = () => {} } = {}) {
 	const state = createStructuralFrontierState(board, options);
 	if (!state) return emptyPlacementFrontier();
+	let forcedCount = 0;
 	while (!state.done) {
 		const placed = stepStructuralFrontier(state);
-		if (!placed) continue;
-		onForced({ ...placed, _inferenceStatus: 'forced' });
-		await yieldControl();
+		if (placed) {
+			forcedCount++;
+			onForced({ ...placed, _inferenceStatus: 'forced' });
+		}
+		const pause = yieldControl({ forcedCount });
+		if (pause) await pause;
 	}
 	return finishStructuralFrontier(state);
 }
@@ -162,6 +176,7 @@ function stepStructuralFrontier(state) {
 		if (types.length === 1) state.vertexTypes.set(vertexKey(point), types[0]);
 		else state.vertexTypes.delete(vertexKey(point));
 		if (types.length) state.pendingCandidates = forcedVertexCompletionCandidates(state.virtual, point, types, state.structuralOptions, state.searchContext);
+		return null;
 	}
 	return null;
 }
@@ -817,10 +832,10 @@ export function isCyclicSegment(sequence, pattern) {
 
 export function edgeSymbolFor(shape, edgeName, matchingPattern = 'normal') { return edgeMatchesFor(shape, matchingPattern)[edgeName]; }
 
-export function isLegalPlacement(board, tile, { allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true } = {}) {
+export function isLegalPlacement(board, tile, { allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, ignoreMatchingRules = false } = {}) {
 	// 候補には未確定の周辺タイルへ採用するパターンも記録されるため、ここでも
 	// 改めて全組合せを解き直して検証する。
-	const resolved = resolveMatchingPatterns(board, tile, { allowVerticalMatchingPattern });
+	const resolved = ignoreMatchingRules || resolveMatchingPatterns(board, tile, { allowVerticalMatchingPattern });
 	return Boolean(
 		(allowTerrainHalfTurn || (tile.terrainPattern || 'normal') === 'normal')
 		&& resolved

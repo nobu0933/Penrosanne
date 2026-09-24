@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=Noto+Sans+JP:wght@400;600;700&display=swap');
+:root { --table:#4d746f; --sand:#e6c9b4; --side:#00513e; --ink:#333; --body:'Noto Sans JP',sans-serif; --display:'Chakra Petch','Noto Sans JP',sans-serif; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--table); color:white; font:14px/1.6 var(--body); }
+.app-shell { max-width:1600px; margin:auto; padding:24px 28px 48px; }
+.topbar { display:flex; align-items:center; flex-wrap:wrap; gap:18px 24px; padding-bottom:28px; }
+.brand { margin-right:auto; color:white; text-decoration:none; font:700 21px var(--display); letter-spacing:.1em; }
+.brand span { display:block; font-size:11px; letter-spacing:.16em; color:var(--sand); }
+.status { display:none; }
+.language-switch,.gallery-theme-label { display:flex; flex-direction:column; gap:8px; font-size:12px; min-width:0; }
+.language-switch { width:145px; }
+button,select,input { font:inherit; }
+button,.topbar-link { border:0; border-radius:8px; padding:12px 16px; background:var(--sand); color:var(--ink); font:700 13px/1.5 var(--display); cursor:pointer; box-shadow:0 5px 0 #8a6854; min-height:44px; text-decoration:none; transition:transform 80ms,box-shadow 80ms; }
+button:hover:not(:disabled),.topbar-link:hover { transform:translateY(-2px); box-shadow:0 7px 0 #8a6854; }
+button:active:not(:disabled),.topbar-link:active { transform:translateY(4px); box-shadow:0 1px 0 #8a6854; }
+button:disabled { opacity:.48; cursor:default; box-shadow:none; }
+select { width:100%; min-height:44px; border:0; border-radius:7px; background:var(--sand); color:var(--ink); padding:10px; box-shadow:0 4px 0 #8a6854; }
+:focus-visible { outline:3px solid white; outline-offset:5px; }
+.tile-gallery-toolbar { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; padding:12px 0 30px; border-bottom:1px solid #86a29c; }
+.tile-gallery-toolbar>div:first-child { grid-column:1 / -1; }
+.eyebrow { margin:0; color:var(--sand); font:700 12px var(--display); letter-spacing:.15em; }
+h1 { margin:6px 0 10px; font:700 28px var(--display); }
+.small-note { margin:8px 0 0; font-size:12px; color:#e0e9e5; max-width:850px; }
+.gallery-anchor-tools,.gallery-deck-tools { display:flex; flex-direction:column; align-items:flex-start; gap:14px; min-width:0; }
+.gallery-anchor-tools button,.gallery-deck-tools button { max-width:100%; }
+.anchor-edit-toggle { display:flex; align-items:center; gap:8px; cursor:pointer; }
+.anchor-edit-toggle input { width:20px; height:20px; accent-color:var(--side); flex:none; }
+.tile-gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr)); gap:28px 24px; margin-top:30px; }
+.tile-debug-card { min-width:0; border:1px solid #86a29c; border-radius:10px; overflow:hidden; }
+.tile-debug-card header { padding:16px 16px 0; }
+.tile-debug-card h2 { margin:0 0 6px; font:700 17px/1.3 var(--display); overflow-wrap:anywhere; }
+.tile-debug-meta { margin:0; font:600 11px/1.7 var(--display); color:var(--sand); overflow-wrap:anywhere; }
+.tile-debug-canvas-wrap { height:230px; margin:0 10px; }
+.tile-debug-canvas { display:block; width:100%; height:100%; touch-action:none; }
+.tile-debug-canvas.anchor-editing { cursor:grab; }
+.tile-debug-canvas.anchor-editing:active { cursor:grabbing; }
+.tile-anchor-list { list-style:none; padding:0 16px 16px; margin:0; font-size:11px; }
+.tile-anchor-list li { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; padding:5px 0; border-top:1px solid #77958f; }
+.tile-anchor-list li span { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.deck-adjustable { cursor:pointer; }
+.deck-adjustable:hover { border-color:var(--sand); }
+.deck-excluded { background:#526260; border-style:dashed; }
+.deck-excluded .tile-debug-canvas { filter:grayscale(1); opacity:.55; }
+.hidden,[hidden] { display:none !important; }
+@media(min-width:1100px) { .tile-gallery-toolbar { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(max-width:600px) { .app-shell { padding:18px 16px 36px; } .topbar { gap:16px; } .brand { width:100%; } .topbar-link { flex:1; text-align:center; } .tile-gallery-toolbar { grid-template-columns:minmax(0,1fr); gap:22px; } .tile-gallery { gap:24px; } }

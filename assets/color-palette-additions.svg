@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="1510" viewBox="0 0 1120 1510" role="img" aria-labelledby="title desc">
+  <title id="title">既存色と追加色をまとめたカラーパレット</title>
+  <desc id="desc">元画像から採取した15色と、それらに調和する6色の追加カラー。</desc>
+  <style>
+    .label { font: 600 18px 'Segoe UI', 'Yu Gothic UI', sans-serif; fill: #1D1D1D; }
+    .code { font: 500 15px 'Segoe UI', 'Yu Gothic UI', sans-serif; fill: #5C5C5C; letter-spacing: .3px; }
+    .heading { font: 700 30px 'Segoe UI', 'Yu Gothic UI', sans-serif; fill: #1D1D1D; }
+    .sub { font: 500 17px 'Segoe UI', 'Yu Gothic UI', sans-serif; fill: #666; }
+  </style>
+  <rect width="1120" height="1510" fill="#F7F6F2"/>
+  <text x="60" y="65" class="heading">カラーパレット</text>
+  <text x="60" y="98" class="sub">既存色 15色 ＋ 追加色 6色</text>
+  <text x="60" y="154" class="heading" font-size="24">既存色</text>
+  <g transform="translate(60 185)">
+    <g><rect width="220" height="120" rx="14" fill="#F0A8AB"/><text x="0" y="150" class="label">ソフトピンク</text><text x="0" y="175" class="code">#F0A8AB</text></g>
+    <g transform="translate(260 0)"><rect width="220" height="120" rx="14" fill="#B44D8E"/><text x="0" y="150" class="label">ローズパープル</text><text x="0" y="175" class="code">#B44D8E</text></g>
+    <g transform="translate(520 0)"><rect width="220" height="120" rx="14" fill="#FACA4E"/><text x="0" y="150" class="label">ゴールデンイエロー</text><text x="0" y="175" class="code">#FACA4E</text></g>
+    <g transform="translate(780 0)"><rect width="220" height="120" rx="14" fill="#E48745"/><text x="0" y="150" class="label">テラコッタ</text><text x="0" y="175" class="code">#E48745</text></g>
+    <g transform="translate(0 225)"><rect width="220" height="120" rx="14" fill="#A8E7D7"/><text x="0" y="150" class="label">ミント</text><text x="0" y="175" class="code">#A8E7D7</text></g>
+    <g transform="translate(260 225)"><rect width="220" height="120" rx="14" fill="#74B8FF"/><text x="0" y="150" class="label">スカイブルー</text><text x="0" y="175" class="code">#74B8FF</text></g>
+    <g transform="translate(520 225)"><rect width="220" height="120" rx="14" fill="#9DA1FF"/><text x="0" y="150" class="label">ラベンダー</text><text x="0" y="175" class="code">#9DA1FF</text></g>
+    <g transform="translate(780 225)"><rect width="220" height="120" rx="14" fill="#2D68C7"/><text x="0" y="150" class="label">ロイヤルブルー</text><text x="0" y="175" class="code">#2D68C7</text></g>
+    <g transform="translate(0 450)"><rect width="220" height="120" rx="14" fill="#D5E24E"/><text x="0" y="150" class="label">ライムイエロー</text><text x="0" y="175" class="code">#D5E24E</text></g>
+    <g transform="translate(260 450)"><rect width="220" height="120" rx="14" fill="#B99C19"/><text x="0" y="150" class="label">マスタード</text><text x="0" y="175" class="code">#B99C19</text></g>
+    <g transform="translate(520 450)"><rect width="220" height="120" rx="14" fill="#568500"/><text x="0" y="150" class="label">グラスグリーン</text><text x="0" y="175" class="code">#568500</text></g>
+    <g transform="translate(780 450)"><rect width="220" height="120" rx="14" fill="#437700"/><text x="0" y="150" class="label">フォレストグリーン</text><text x="0" y="175" class="code">#437700</text></g>
+    <g transform="translate(0 675)"><rect width="220" height="120" rx="14" fill="#333333"/><text x="0" y="150" class="label">チャコール</text><text x="0" y="175" class="code">#333333</text></g>
+    <g transform="translate(260 675)"><rect width="220" height="120" rx="14" fill="#FFFFFF" stroke="#D8D6D0"/><text x="0" y="150" class="label">ホワイト</text><text x="0" y="175" class="code">#FFFFFF</text></g>
+    <g transform="translate(520 675)"><rect width="220" height="120" rx="14" fill="#A7ADF4"/><text x="0" y="150" class="label">ペリウィンクル</text><text x="0" y="175" class="code">#A7ADF4</text></g>
+  </g>
+  <text x="60" y="1110" class="heading" font-size="24">追加色</text>
+  <g transform="translate(60 1140)">
+    <g><rect width="300" height="90" rx="14" fill="#E6C9B4"/><text x="0" y="120" class="label">サンドベージュ</text><text x="0" y="145" class="code">#E6C9B4</text></g>
+    <g transform="translate(370 0)"><rect width="300" height="90" rx="14" fill="#6E5143"/><text x="0" y="120" class="label">ココアブラウン</text><text x="0" y="145" class="code">#6E5143</text></g>
+    <g transform="translate(740 0)"><rect width="300" height="90" rx="14" fill="#4F9B91"/><text x="0" y="120" class="label">ティール</text><text x="0" y="145" class="code">#4F9B91</text></g>
+  </g>
+  <g transform="translate(60 1325)">
+    <g><rect width="300" height="90" rx="14" fill="#79944B"/><text x="0" y="120" class="label">オリーブグリーン</text><text x="0" y="145" class="code">#79944B</text></g>
+    <g transform="translate(370 0)"><rect width="300" height="90" rx="14" fill="#6C4D8B"/><text x="0" y="120" class="label">プラムパープル</text><text x="0" y="145" class="code">#6C4D8B</text></g>
+    <g transform="translate(740 0)"><rect width="300" height="90" rx="14" fill="#C5CCD3"/><text x="0" y="120" class="label">クールグレー</text><text x="0" y="145" class="code">#C5CCD3</text></g>
+  </g>
+</svg>

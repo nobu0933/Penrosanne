@@ -199,7 +199,6 @@ function addTileCard(source) {
 		side,
 		placed: [tile],
 		candidates: [],
-		showVertices: () => true,
 		onFeatureSelect: () => {},
 		allowCameraControls: false,
 		// 一覧はアンカー確認用なので、差し替え可能なSVGをそのまま表示する。

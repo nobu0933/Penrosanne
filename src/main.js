@@ -1,20 +1,20 @@
-import { edgeIndex, edgeVertexPairs, verticesFor } from './game/Tile.js';
 import { GameEngine } from './game/GameEngine.js';
 import { BoardView } from './ui/BoardView.js';
 import { TileTheme } from './ui/TileTheme.js';
+import { TileDrag } from './ui/TileDrag.js';
+import { handDisplayTile, handTileLayout } from './ui/HandTileLayout.js';
+import { PublicHands, drawHandTile } from './ui/PublicHands.js';
+import { handTileId, candidatesForHandTile, uniqueCandidatePositions, handChoicesAtPosition } from './game/HandCandidates.js';
+import { progressiveDisplayPacing } from './ui/ProgressiveDisplayTiming.js';
+import { createSearchCheckpoint, yieldForSearchPaint } from './ui/SearchProgress.js';
 import { markerForFeature } from './ui/FeatureAnchors.js';
-import { MEEPLE_ASSETS, playerColor } from './ui/MeepleAssets.js';
+import { MEEPLE_ASSET_COUNT, meepleAssetForPlayer, meepleKindForFeature, playerColor, selectedMeepleColor, setPlayerMeepleColors } from './ui/MeepleAssets.js';
 import { DECK_CONFIGS } from './game/TileSet.js';
+import { TITLE_DEFINITIONS, provisionalTitleLeaders } from './game/Scoring.js';
 import { structuralPositionKey } from './game/Rules.js';
 import { applyTranslations, bindLanguageSelect, deckText, t } from './ui/i18n.js';
+import { finalCrownRanks, finalScoreAtTime, scoreProgressAtTime } from './ui/ScorePresentation.js';
 
-const palette = {
-	field: '#a9c579',
-	road: '#c69b67',
-	city: '#b55850',
-	monastery: '#d9b462',
-	white: '#fffdf7',
-};
 // 開始前設定画面ができるまでの、ルールをまとめた暫定設定値。
 const gameRules = {
 	allowVerticalMatchingPattern: true,
@@ -22,14 +22,13 @@ const gameRules = {
 	allowTerrainMirror: true,
 };
 const side = Math.round(window.innerHeight / 5);
-let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules });
-let showVertices = true,
-	candidates = [],
+let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules, deferCandidateSearch: true });
+let candidates = [],
 	provisional = null,
-	dragPreview = null,
-	tileDragging = false,
 	hoveredPlayerIndex = null,
 	structuralSearchPending = false,
+	structuralSearchProgressCount = 0,
+	progressiveAnimationEnabled = true,
 	progressiveForcedCandidates = [],
 	structuralSearchToken = 0,
 	progressiveDisplayQueue = [],
@@ -37,22 +36,25 @@ let showVertices = true,
 	progressiveSearchResult = null,
 	progressiveSearchCompleted = false,
 	progressiveBaselineForcedKeys = new Set(),
-	progressiveDisplayIntervalMs = 120;
+	progressiveDisplayIntervalMs = 120,
+	progressiveDisplayBatchSize = 1;
 // 1 枚ずつ増えていくことを明確に見せるための最小間隔。探索自体の結果は変えない。
 const PROGRESSIVE_FRONTIER_INTERVAL_MS = 120;
-const PROGRESSIVE_FRONTIER_MAX_DURATION_MS = 2000;
 const el = {
 	board: document.querySelector('#board'),
-	current: document.querySelector('#current-tile'),
+	currentHand: document.querySelector('#current-hand'),
+	currentTile: document.querySelector('#current-tile'),
 	activeLabel: document.querySelector('#active-player-label'),
 	heading: document.querySelector('#turn-heading'),
-	score: document.querySelector('.score-row strong'),
-	meeples: document.querySelector('#meeple-count'),
-	tileLabel: document.querySelector('#tile-label'),
+	titleStatus: document.querySelector('#title-status'),
 	thin: document.querySelector('#thin-count'),
 	fat: document.querySelector('#fat-count'),
 	scores: document.querySelector('#scoreboard'),
 	finalScoreDetails: document.querySelector('#final-score-details'),
+	logTitle: document.querySelector('#log-title'),
+	logSection: document.querySelector('#play-log-section'),
+	logSectionToggle: document.querySelector('#log-section-toggle'),
+	scoreSectionToggle: document.querySelector('#score-section-toggle'),
 	confirm: document.querySelector('#confirm-placement'),
 	skip: document.querySelector('#skip-meeple'),
 	options: document.querySelector('#meeple-options'),
@@ -62,32 +64,178 @@ const el = {
 	redo: document.querySelector('#redo-tile'),
 	forceEnd: document.querySelector('#force-end'),
 	redraw: document.querySelector('#redraw-tile'),
-	mirror: document.querySelector('#mirror-tile'),
 	placementActions: document.querySelector('#placement-actions'),
 	theme: document.querySelector('#theme-select'),
 	deck: document.querySelector('#deck-select'),
+	handMode: document.querySelector('#hand-mode-select'),
+	handChoice: document.querySelector('#hand-choice'),
+	handChoiceOptions: document.querySelector('#hand-choice-options'),
 	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
+	fieldRuleMode: document.querySelector('#field-rule-mode-select'),
+	matchingRuleMode: document.querySelector('#matching-rule-mode-select'),
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
 	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
 	startDeck: document.querySelector('#start-deck'),
+	playerCount: document.querySelector('#player-count-select'),
+	player1Color: document.querySelector('#player1-color'),
+	player2Color: document.querySelector('#player2-color'),
+	player3Color: document.querySelector('#player3-color'),
+	player4Color: document.querySelector('#player4-color'),
+	player1ColorSwatch: document.querySelector('#player1-color-swatch'),
+	player2ColorSwatch: document.querySelector('#player2-color-swatch'),
+	player3ColorSwatch: document.querySelector('#player3-color-swatch'),
+	player4ColorSwatch: document.querySelector('#player4-color-swatch'),
 	language: document.querySelector('#language-select'),
 	replayButton: document.querySelector('#replay-game'),
 };
+const playerColorSettings = Array.from({ length: 4 }, (_, index) => ({
+	select: el[`player${index + 1}Color`],
+	swatch: el[`player${index + 1}ColorSwatch`],
+	container: document.querySelector(`.player-color-setting[data-player-index="${index}"]`),
+}));
+const titleRuleSettings = new Map();
+for (const { id } of TITLE_DEFINITIONS) {
+	const label = document.createElement('label');
+	const name = document.createElement('span');
+	name.dataset.i18n = `title.${id}`;
+	const select = document.createElement('select');
+	select.id = `title-${id}-mode-select`;
+	for (const [value, key] of [['off', 'settings.off'], ['on', 'settings.on']]) {
+		const option = document.createElement('option');
+		option.value = value;
+		option.dataset.i18n = key;
+		select.append(option);
+	}
+	label.append(name, select);
+	document.querySelector('#title-rule-settings').append(label);
+	titleRuleSettings.set(id, select);
+}
 function renderDeckOptions() {
 	const selected = el.deck.value || engine.deckType;
 	el.deck.replaceChildren();
 	for (const deck of DECK_CONFIGS) {
 		const option = document.createElement('option'), text = deckText(deck);
 		option.value = deck.id;
-		option.textContent = `${text.label} — ${text.description}`;
+		option.textContent = text.label;
 		option.selected = deck.id === selected;
 		el.deck.append(option);
 	}
 }
 renderDeckOptions();
-let view;
-let historyHover = null, replay = null, replayedEngine = null, replayTimer = null, replayComplete = false, logSignature = '';
+let view, tileMotion, logCameraOffset = 0, logOpen = false, handChoicePosition = null;
+const publicHands = new PublicHands({
+	onDrag: (event, tile, canvas) => {
+		if (event.button!==0 || !gameStarted || replay || structuralSearchPending || tileMotion?.busy || engine.state.phase!=='placeTile') return;
+		closeHandChoice();
+		engine.selectHandTile(tile.id);
+		tileMotion.begin(event,null,true,canvas);
+	},
+	onRedraw: tileId => redrawHandTile(tileId),
+});
+let gameStarted = false;
+function renderMeepleColorOptions() {
+	playerColorSettings.forEach(({ select }, playerIndex) => {
+		const selected = Number(select.value) || selectedMeepleColor(playerIndex);
+		select.replaceChildren();
+		for (let color = 1; color <= MEEPLE_ASSET_COUNT; color++) {
+			const option = document.createElement('option');
+			option.value = String(color);
+			option.textContent = t('setup.colorNumber', { number: String(color).padStart(2, '0') });
+			option.selected = color === selected;
+			select.append(option);
+		}
+		select.value = String(selected);
+	});
+	updatePlayerCountSettings();
+	updateMeepleColorSettings();
+}
+function updatePlayerCountSettings() {
+	const count = Number(el.playerCount.value) || 2;
+	playerColorSettings.forEach(({ container }, index) => container.classList.toggle('hidden', index >= count));
+}
+function updateMeepleColorSettings() {
+	const colors = playerColorSettings.map(({ select }, index) => Number(select.value) || selectedMeepleColor(index));
+	setPlayerMeepleColors(colors);
+	playerColorSettings.forEach(({ swatch }, playerIndex) => {
+		swatch.src = `assets/meeples/meeple-standing_${colors[playerIndex]}.svg`;
+	});
+	if (view) render();
+}
+renderMeepleColorOptions();
+let historyHover = null, replay = null, replayedEngine = null, replayTimer = null, replayComplete = false, logSignature = '', previewDropFrame = null, finalPanelMode = 'scores';
+let displayedScores = new Map(), liveScoreAnimations = new Map(), scoreAnimationFrame = null, finalScoreReveal = null;
+let scoreElements = new Map(), crownElements = new Map();
+
+function resetScorePresentation() {
+	if (scoreAnimationFrame !== null) cancelAnimationFrame(scoreAnimationFrame);
+	scoreAnimationFrame = null;
+	liveScoreAnimations.clear();
+	finalScoreReveal = null;
+	displayedScores = new Map(engine.state.players.map((player) => [player.id, player.score]));
+}
+function scheduleScoreFrame() {
+	if (scoreAnimationFrame === null) scoreAnimationFrame = requestAnimationFrame(updateScoreFrame);
+}
+function updateScoreFrame(now) {
+	scoreAnimationFrame = null;
+	if (finalScoreReveal?.active) {
+		const elapsed = Math.max(0, now - finalScoreReveal.startedAt);
+		const value = scoreProgressAtTime(elapsed);
+		for (const player of engine.state.players) {
+			const shown = finalScoreAtTime(player.score, elapsed);
+			displayedScores.set(player.id, shown);
+			if (scoreElements.get(player.id)) scoreElements.get(player.id).textContent = shown;
+			const crown = crownElements.get(player.id);
+			if (crown && shown === player.score && (
+				finalScoreReveal.ranks.get(player.id) === 'silver' ||
+				(finalScoreReveal.ranks.get(player.id) === 'gold' && value >= finalScoreReveal.highest)
+			)) {
+				finalScoreReveal.unlocked.add(player.id);
+				crown.classList.remove('hidden');
+			}
+		}
+		if (value < finalScoreReveal.highest) { scheduleScoreFrame(); return; }
+		finalScoreReveal.active = false;
+		renderScores();
+		renderFinalLogSections();
+		return;
+	}
+	for (const [id, animation] of liveScoreAnimations) {
+		const progress = Math.min(1, (now - animation.startedAt) / animation.duration);
+		const eased = 1 - (1 - progress) ** 3;
+		const shown = progress === 1 ? animation.to : Math.round(animation.from + (animation.to - animation.from) * eased);
+		displayedScores.set(id, shown);
+		if (scoreElements.get(id)) scoreElements.get(id).textContent = shown;
+		if (progress === 1) liveScoreAnimations.delete(id);
+	}
+	if (liveScoreAnimations.size) scheduleScoreFrame();
+}
+function startFinalScoreReveal() {
+	if (scoreAnimationFrame !== null) cancelAnimationFrame(scoreAnimationFrame);
+	scoreAnimationFrame = null;
+	liveScoreAnimations.clear();
+	const scores = [...new Set(engine.state.players.map((player) => player.score))].sort((a, b) => b - a);
+	const ranks = finalCrownRanks(engine.state.players);
+	finalScoreReveal = { startedAt: performance.now(), highest: scores[0] || 0, ranks, unlocked: new Set(), active: true };
+	displayedScores = new Map(engine.state.players.map((player) => [player.id, 0]));
+	scheduleScoreFrame();
+}
+function prepareLiveScoreAnimations() {
+	if (engine.state.finished || replay) return;
+	const now = performance.now();
+	for (const player of engine.state.players) {
+		if (!displayedScores.has(player.id)) displayedScores.set(player.id, player.score);
+		const animation = liveScoreAnimations.get(player.id);
+		if (animation?.to === player.score || (!animation && displayedScores.get(player.id) === player.score)) continue;
+		const from = displayedScores.get(player.id);
+		liveScoreAnimations.set(player.id, {
+			from, to: player.score, startedAt: now,
+			duration: Math.min(650, Math.max(230, Math.abs(player.score - from) * 22)),
+		});
+	}
+	if (liveScoreAnimations.size) scheduleScoreFrame();
+}
 const tileTheme = new TileTheme({
 	onChange: () => {
 		// テーマごとのアンカー上書きもあるため、単なるCanvas再描画ではなく
@@ -100,28 +248,54 @@ view = new BoardView(el.board, {
 	placed: engine.state.board.tiles,
 	candidates: [],
 	structuralCandidates: [],
-	showVertices: () => showVertices,
 	// 実際のゲーム盤面では、タイル一覧より見分けやすい約2倍の大きさで描画する。
 	meepleScale: 2,
 	onFeatureSelect: (marker) => placeMeeple(marker.option),
-	onPreviewDragStart: (event) => {
-		if (!provisional) return;
-		provisional = null;
-		tileDragging = true;
-		updateTileDrag(event);
-	},
+	onPreviewDragStart: (event) => tileMotion?.begin(event, provisional),
+	isTileHeld: () => tileMotion?.busy,
+	onCancelTileDrag: () => tileMotion?.cancel(),
+	onRender: () => { if (view) { renderPlacementActions(); positionHandChoice(); } },
 	onPreviewPatternCycle: () => cycleProvisionalPattern(),
 	onSelect: (tile) => {
-		if (engine.state.phase !== 'placeTile') return;
-		provisional = tile;
-		dragPreview = null;
-		render();
+		if (engine.state.phase !== 'placeTile' || structuralSearchPending || tileMotion?.busy) return;
+		selectCandidate(tile);
 	},
 	tileTheme,
 });
+function syncLogCameraOffset(resetBase = false) {
+	if (!view) return;
+	if (resetBase) logCameraOffset = 0;
+	const target = logOpen ? -Math.min(180, view.width * .17) : 0;
+	view.camera.x += target - logCameraOffset;
+	logCameraOffset = target;
+	view.render();
+}
 
 function displayCandidates() {
 	return displayCandidateTiles(engine.candidates());
+}
+function stopPreviewDrop() {
+	if (previewDropFrame !== null) cancelAnimationFrame(previewDropFrame);
+	previewDropFrame = null;
+	if (view) view.previewDropOffsetY = 0;
+}
+function animateCandidatePreview(tile) {
+	closeHandChoice();
+	if (engine.privatePlanning) engine.selectHandTile(handTileId(tile));
+	stopPreviewDrop();
+	provisional = tile;
+	view.previewDropOffsetY = side * .34;
+	render();
+	const started = performance.now(), duration = 165, initialOffset = side * .34;
+	const frame = now => {
+		if (provisional !== tile || engine.state.phase !== 'placeTile') { stopPreviewDrop(); return; }
+		const progress = Math.min(1, (now - started) / duration), eased = 1 - (1 - progress) ** 3;
+		view.previewDropOffsetY = initialOffset * (1 - eased);
+		view.render();
+		if (progress < 1) previewDropFrame = requestAnimationFrame(frame);
+		else { previewDropFrame = null; view.previewDropOffsetY = 0; view.render(); }
+	};
+	previewDropFrame = requestAnimationFrame(frame);
 }
 function displayCandidateTiles(tiles) { return tiles.map((tile, index) => ({ ...tile, _candidateKey: `regular:${tile.id}:${index}` })); }
 function resetProgressiveDisplay({ preserveVisible = false } = {}) {
@@ -132,6 +306,7 @@ function resetProgressiveDisplay({ preserveVisible = false } = {}) {
 	progressiveSearchCompleted = false;
 	progressiveBaselineForcedKeys = new Set();
 	progressiveDisplayIntervalMs = PROGRESSIVE_FRONTIER_INTERVAL_MS;
+	progressiveDisplayBatchSize = 1;
 	if (!preserveVisible) progressiveForcedCandidates = [];
 }
 function progressiveForcedHas(tile) {
@@ -145,7 +320,7 @@ function removeProgressiveForcedCandidate(tile) {
 	progressiveDisplayQueue = progressiveDisplayQueue.filter((entry) => structuralPositionKey(entry) !== key);
 }
 function queueProgressiveForced(tile, token) {
-	if (token !== structuralSearchToken || progressiveForcedHas(tile)) return;
+	if (token !== structuralSearchToken || !progressiveAnimationEnabled || progressiveForcedHas(tile)) return;
 	progressiveDisplayQueue.push(tile);
 	if (progressiveDisplayTimer === null && progressiveForcedCandidates.length === 0) revealNextProgressiveForced(token, true);
 	else if (progressiveDisplayTimer === null) revealNextProgressiveForced(token);
@@ -154,11 +329,12 @@ function revealNextProgressiveForced(token, immediately = false) {
 	const reveal = () => {
 		progressiveDisplayTimer = null;
 		if (token !== structuralSearchToken) return;
-		const tile = progressiveDisplayQueue.shift();
-		if (tile) {
-			progressiveForcedCandidates.push(tile);
-			render();
+		let added = 0;
+		while (added < progressiveDisplayBatchSize && progressiveDisplayQueue.length) {
+			progressiveForcedCandidates.push(progressiveDisplayQueue.shift());
+			added++;
 		}
+		if (added) render();
 		if (progressiveDisplayQueue.length) revealNextProgressiveForced(token);
 		else finishProgressiveDisplay(token);
 	};
@@ -175,6 +351,7 @@ function finishProgressiveDisplay(token) {
 	render();
 }
 function refreshCandidates() {
+	closeHandChoice();
 	const token = ++structuralSearchToken;
 	if (engine.state.phase !== 'placeTile') {
 		resetProgressiveDisplay({ preserveVisible: true });
@@ -182,108 +359,110 @@ function refreshCandidates() {
 		structuralSearchPending = false;
 		return;
 	}
-	engine.deferCandidateSearch = Boolean(el.progressiveFrontier.checked);
-	if (!engine.deferCandidateSearch) {
-		resetProgressiveDisplay();
-		structuralSearchPending = false;
-		candidates = displayCandidates();
-		return;
-	}
+	// 開発用トグルは順次表示だけを切り替える。探索中の描画機会は常に確保する。
+	engine.deferCandidateSearch = true;
+	progressiveAnimationEnabled = el.progressiveFrontier.checked;
 	// 前盤面から残る確定配置は最初から表示し、新しく増えた分だけをキューに載せる。
 	resetProgressiveDisplay({ preserveVisible: true });
 	progressiveBaselineForcedKeys = new Set(progressiveForcedCandidates.map(structuralPositionKey));
 	candidates = [];
 	structuralSearchPending = true;
+	structuralSearchProgressCount = 0;
 	resolveCandidatesProgressively(token);
 }
 async function resolveCandidatesProgressively(token) {
-	const groups = await engine.candidateGroupsProgressively({
-		onForced: (tile) => {
-			queueProgressiveForced(tile, token);
-		},
-		// 描画の間隔は下の表示キューで制御する。探索ごとの rAF 待機は入れず、
-		// 確定数に応じて全アニメーション時間を上限内に収める。
-		yieldControl: () => Promise.resolve(),
-	});
-	if (token !== structuralSearchToken) return;
-	progressiveSearchResult = groups;
-	const addedCount = groups.forced.filter((tile) => !progressiveBaselineForcedKeys.has(structuralPositionKey(tile))).length;
-	progressiveDisplayIntervalMs = Math.min(
-		PROGRESSIVE_FRONTIER_INTERVAL_MS,
-		PROGRESSIVE_FRONTIER_MAX_DURATION_MS / Math.max(1, addedCount - 1),
-	);
-	// キャッシュ命中時は onForced が呼ばれないので、未表示分をここでキューへ補う。
-	groups.forced.forEach((tile) => queueProgressiveForced(tile, token));
-	// ここより前はキュー投入中なので、途中で表示完了として扱わない。
-	progressiveSearchCompleted = true;
-	finishProgressiveDisplay(token);
+	const searchingEngine = engine;
+	try {
+		// 重い探索を始める前に、案内文と待機カーソルを実際に描画する。
+		render();
+		await yieldForSearchPaint();
+		if (token !== structuralSearchToken) return;
+		const checkpoint = createSearchCheckpoint({
+			onProgress: count => { structuralSearchProgressCount = count; updateSearchStatus(); },
+			yieldToBrowser: yieldForSearchPaint,
+		});
+		const groups = await searchingEngine.candidateGroupsProgressively({
+			onForced: tile => queueProgressiveForced(tile, token),
+			yieldControl: progress => {
+				if (token !== structuralSearchToken) throw new Error('Search superseded');
+				return checkpoint(progress);
+			},
+		});
+		if (token !== structuralSearchToken) return;
+		progressiveSearchResult = groups;
+		const addedCount = groups.forced.filter((tile) => !progressiveBaselineForcedKeys.has(structuralPositionKey(tile))).length;
+		structuralSearchProgressCount = addedCount;
+		updateSearchStatus();
+		const pacing = progressiveDisplayPacing(addedCount);
+		progressiveDisplayIntervalMs = pacing.intervalMs;
+		progressiveDisplayBatchSize = pacing.batchSize;
+		// キャッシュ命中時は onForced が呼ばれないので、未表示分をここでキューへ補う。
+		groups.forced.forEach(tile => queueProgressiveForced(tile, token));
+		progressiveSearchCompleted = true;
+		finishProgressiveDisplay(token);
+	} catch (error) {
+		if (token !== structuralSearchToken) return;
+		resetProgressiveDisplay({ preserveVisible: true });
+		structuralSearchPending = false;
+		render();
+		el.heading.textContent = t('game.expansionFailed');
+		console.error(error);
+	}
+}
+function updateSearchStatus() {
+	document.querySelector('.game-table').classList.toggle('search-pending', structuralSearchPending);
+	el.board.setAttribute('aria-busy', String(structuralSearchPending));
+	if (structuralSearchPending) el.heading.textContent = structuralSearchProgressCount
+		? t('game.expandingProgress', { count: structuralSearchProgressCount })
+		: t('game.expanding');
 }
 function allCandidates() { return candidates; }
-function drawTilePreview(tile) {
-	const ctx = el.current.getContext('2d');
-	ctx.clearRect(0, 0, 220, 180);
-	if (!tile) return;
-	const preview = { ...tile, centerX: 110, centerY: 90 },
-		points = verticesFor(preview, 65),
-		ids = Object.keys(points),
-		pairs = edgeVertexPairs(preview.shape);
-	ctx.beginPath();
-	ids.forEach((id, index) => {
-		const point = points[id];
-		index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
-	});
-	ctx.closePath();
-	ctx.fillStyle = palette.field;
-	ctx.fill();
-	ctx.strokeStyle = '#425e50';
-	ctx.lineWidth = 3;
-	ctx.stroke();
-	(preview.featureGroups?.field || []).forEach((_, index) => tileTheme.draw(ctx, preview, 'field', index, 65));
-	(preview.featureGroups?.road || []).forEach((group, roadIndex) => {
-		if (tileTheme.draw(ctx, preview, 'road', roadIndex, 65)) return;
-		(group || []).map(edgeIndex).filter((edge) => edge >= 0).forEach((edge) => {
-			const [a, b] = pairs[edge], middle = { x: (points[a].x + points[b].x) / 2, y: (points[a].y + points[b].y) / 2 };
-			ctx.beginPath(); ctx.moveTo(110, 90); ctx.lineTo(middle.x, middle.y);
-			ctx.strokeStyle = palette.road; ctx.lineWidth = 14; ctx.stroke();
-			ctx.strokeStyle = '#745536'; ctx.lineWidth = 2; ctx.stroke();
-		});
-	});
-	(preview.featureGroups?.city || []).forEach((group, cityIndex) => {
-		if (tileTheme.draw(ctx, preview, 'city', cityIndex, 65)) return;
-		const edges = group.map(edgeIndex).filter((edge) => edge >= 0), connectedRoad = Object.values(preview.roadTerminals || {}).some((terminals) => terminals.some((terminal) => terminal.kind === 'city' && terminal.cityGroup === cityIndex)), innerPoints = [];
-		if (edges.length === 4) {
-			ctx.beginPath(); Object.values(points).forEach((point, pointIndex) => pointIndex ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)); ctx.closePath(); ctx.fillStyle = palette.city; ctx.fill(); return;
-		}
-		edges.forEach((edge) => {
-			const [a, b] = pairs[edge], midpoint = { x: (points[a].x + points[b].x) / 2, y: (points[a].y + points[b].y) / 2 }, amount = connectedRoad ? 1.52 : .62, control = { x: midpoint.x + (110 - midpoint.x) * amount, y: midpoint.y + (90 - midpoint.y) * amount };
-			innerPoints.push({ x: midpoint.x + (110 - midpoint.x) * (connectedRoad ? .76 : .31), y: midpoint.y + (90 - midpoint.y) * (connectedRoad ? .76 : .31) });
-			ctx.beginPath(); ctx.moveTo(points[a].x, points[a].y); ctx.lineTo(points[b].x, points[b].y); ctx.quadraticCurveTo(control.x, control.y, points[a].x, points[a].y); ctx.closePath(); ctx.fillStyle = palette.city; ctx.fill(); ctx.strokeStyle = '#813f3a'; ctx.lineWidth = 1.5; ctx.stroke();
-		});
-		if (innerPoints.length > 1) { ctx.beginPath(); ctx.moveTo(innerPoints[0].x, innerPoints[0].y); innerPoints.slice(1).forEach((point) => ctx.lineTo(point.x, point.y)); ctx.strokeStyle = palette.city; ctx.lineWidth = 11; ctx.lineCap = 'round'; ctx.stroke(); }
-	});
-	if (Object.values(preview.roadTerminals || {}).some((terminals) => terminals.some((terminal) => terminal.kind === 'intersection')) && !tileTheme.draw(ctx, preview, 'intersection', 0, 65)) {
-		ctx.beginPath(); ctx.arc(110, 90, 7, 0, Math.PI * 2); ctx.fillStyle = palette.field; ctx.fill(); ctx.strokeStyle = '#745536'; ctx.lineWidth = 2; ctx.stroke();
+function selectedTileCandidates() { return engine.privatePlanning && provisional ? candidatesForHandTile(candidates,provisional) : candidates; }
+function selectCandidate(tile) {
+	if (!engine.privatePlanning) { animateCandidatePreview(tile); return; }
+	const choices=handChoicesAtPosition(candidates,tile);
+	if (choices.length===1) { animateCandidatePreview(choices[0]); return; }
+	if (!choices.length) return;
+	handChoicePosition=tile;
+	el.handChoice.classList.remove('hidden');
+	el.handChoiceOptions.replaceChildren();
+	for (const candidate of choices) {
+		const button=document.createElement('button'), canvas=document.createElement('canvas');
+		const hand=engine.handForPlayer(), index=hand.findIndex(item=>item.id===handTileId(candidate));
+		button.type='button'; button.dataset.tileId=handTileId(candidate);
+		button.setAttribute('aria-label',t('hand.number',{number:index+1})); canvas.setAttribute('aria-hidden','true');
+		canvas.choiceTile=hand[index];
+		button.append(canvas); button.onclick=()=>animateCandidatePreview(candidate);
+		el.handChoiceOptions.append(button);
+		drawHandTile(canvas,hand[index],view);
 	}
-	if (preview.hasMonastery) {
-		if (!tileTheme.draw(ctx, preview, 'monastery', 0, 65)) {
-			ctx.beginPath();
-			ctx.arc(110, 90, 15, 0, Math.PI * 2);
-			ctx.fillStyle = palette.monastery;
-			ctx.fill();
-			ctx.strokeStyle = '#8d6e38';
-			ctx.lineWidth = 2;
-			ctx.stroke();
-		}
+	positionHandChoice();
+	el.handChoiceOptions.querySelector('button')?.focus({preventScroll:true});
+}
+function closeHandChoice() { handChoicePosition=null; el.handChoice.classList.add('hidden'); }
+function positionHandChoice() {
+	if (!handChoicePosition || !view) return;
+	const anchor=view.screenFromWorldPoint({x:handChoicePosition.centerX,y:handChoicePosition.centerY});
+	const maxRight=logOpen ? document.querySelector('#log-area').getBoundingClientRect().left-12 : innerWidth-12;
+	const obstacles=[...document.querySelectorAll('.player-box,.public-hand-tiles,.table-tools,.turn-status,.brand,#log-area:not(.hidden)')].filter(item=>item.getClientRects().length).map(item=>item.getBoundingClientRect());
+	let result=null,width,height;
+	for(const compact of [false,true]) {
+		el.handChoice.classList.toggle('compact-choice',compact);
+		width=el.handChoice.offsetWidth;height=el.handChoice.offsetHeight;
+		const rightLimit=maxRight>width+24?maxRight:innerWidth-12;
+		const xs=[anchor.x-width/2,12,rightLimit-width,...obstacles.flatMap(rect=>[rect.right+12,rect.left-width-12])];
+		const ys=[anchor.y-height-24,anchor.y+28,76,...obstacles.flatMap(rect=>[rect.bottom+12,rect.top-height-12])];
+		const positions=xs.flatMap(x=>ys.map(y=>({x,y})));
+		result=positions.filter(({x,y})=>x>=12 && x+width<=rightLimit && y>=76 && y+height<=innerHeight-12
+			&& !obstacles.some(rect=>x<rect.right+8 && x+width>rect.left-8 && y<rect.bottom+8 && y+height>rect.top-8))
+			.sort((a,b)=>Math.hypot(a.x+width/2-anchor.x,a.y+height-anchor.y)-Math.hypot(b.x+width/2-anchor.x,b.y+height-anchor.y))[0];
+		if(result) break;
 	}
-	Object.values(points).forEach((point) => {
-		ctx.beginPath();
-		ctx.arc(point.x, point.y, 5.5, 0, Math.PI * 2);
-		ctx.fillStyle = palette.white;
-		ctx.fill();
-		ctx.strokeStyle = '#34453e';
-		ctx.lineWidth = 1;
-		ctx.stroke();
-	});
+	const left=result?.x ?? Math.max(12,Math.min(anchor.x-width/2,innerWidth-width-12));
+	const top=result?.y ?? Math.max(76,Math.min(anchor.y-height-24,innerHeight-height-12));
+	el.handChoice.style.left=`${left}px`;el.handChoice.style.top=`${top}px`;
+	el.handChoice.style.setProperty('--choice-arrow-x',`${Math.max(16,Math.min(width-16,anchor.x-left))}px`);
+	for(const canvas of el.handChoiceOptions.querySelectorAll('canvas')) drawHandTile(canvas,canvas.choiceTile,view);
 }
 function markerFor(tile, option) {
 	return markerForFeature(tile, option, side, tileTheme.id);
@@ -315,7 +494,7 @@ function placedMeeples(entries = engine.state.meeples, historical = null) {
 }
 function alternatePlacement() {
 	if (!provisional) return null;
-	const alternatives = allCandidates().filter(
+	const alternatives = selectedTileCandidates().filter(
 		(candidate) =>
 			Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) <
 				1e-4 && Math.abs(Math.abs(candidate.rotation - provisional.rotation) - Math.PI) < 1e-4
@@ -343,7 +522,7 @@ function terrainStateSignature(tile) {
 function terrainAlternatePlacement() {
 	if (!provisional) return null;
 	const currentSignature = terrainStateSignature(provisional);
-	const variants = allCandidates().filter(
+	const variants = selectedTileCandidates().filter(
 		(candidate) => sameCandidateGeometry(candidate, provisional)
 			&& Boolean(candidate.mirrored) === Boolean(provisional.mirrored)
 			&& terrainStateSignature(candidate) !== currentSignature,
@@ -353,7 +532,7 @@ function terrainAlternatePlacement() {
 }
 function terrainMirrorAlternatePlacement() {
 	if (!provisional) return null;
-	const variants = allCandidates().filter(
+	const variants = selectedTileCandidates().filter(
 		(candidate) => sameCandidateGeometry(candidate, provisional)
 			&& Boolean(candidate.mirrored) !== Boolean(provisional.mirrored),
 	);
@@ -371,7 +550,7 @@ function provisionalPatternVariants() {
 	// 対称な地形の normal / halfTurn は1状態へ畳み、右クリック1回で
 	// 実際に見えるパターンが変わるようにする。
 	const unique = new Map();
-	for (const candidate of allCandidates()) {
+	for (const candidate of selectedTileCandidates()) {
 		if (Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) >= 1e-3) continue;
 		if (!unique.has(patternCycleKey(candidate))) unique.set(patternCycleKey(candidate), candidate);
 	}
@@ -385,9 +564,23 @@ function patternCycleKey(tile) {
 function cycleProvisionalPattern() {
 	const variants = provisionalPatternVariants();
 	if (variants.length < 2) return;
+	stopPreviewDrop();
 	const current = variants.findIndex((candidate) => patternCycleKey(candidate) === patternCycleKey(provisional));
 	provisional = variants[(current + 1 + variants.length) % variants.length];
 	render();
+}
+function possiblePlacementControls() {
+	if (!provisional) return { rotate: false, terrainRotate: false, terrainMirror: false };
+	const original = provisional;
+	const possible = { rotate: false, terrainRotate: false, terrainMirror: false };
+	for (const variant of provisionalPatternVariants()) {
+		provisional = variant;
+		possible.rotate ||= Boolean(alternatePlacement());
+		possible.terrainRotate ||= Boolean(terrainAlternatePlacement());
+		possible.terrainMirror ||= Boolean(terrainMirrorAlternatePlacement());
+	}
+	provisional = original;
+	return possible;
 }
 function renderMeepleOptions() {
 	el.options.replaceChildren();
@@ -405,28 +598,135 @@ function meepleCounter(count, playerIndex, { compact = false } = {}) {
 	for (let index = 0; index < count; index++) {
 		const icon = document.createElement('span');
 		icon.className = 'meeple-reserve-icon';
-		icon.style.setProperty('--meeple-color', playerColor(playerIndex));
-		icon.style.setProperty('--meeple-icon', `url("${MEEPLE_ASSETS.reserve}")`);
+		icon.style.setProperty('--meeple-icon', `url("${meepleAssetForPlayer('reserve', playerIndex)}")`);
 		counter.append(icon);
 	}
 	return counter;
 }
+let openTitlePopover = null;
+function positionTitlePopover() {
+	const bubble = el.titleStatus.querySelector('.title-popover:not(.hidden)');
+	if (!bubble) return;
+	bubble.classList.toggle('title-popover-raised', logOpen);
+	bubble.style.setProperty('--popover-shift', '0px');
+	const bounds = bubble.getBoundingClientRect();
+	let minLeft = 12, maxRight = window.innerWidth - 12;
+	if (!logOpen) for (const box of el.scores.querySelectorAll('.player-box')) {
+		const rect = box.getBoundingClientRect();
+		if (rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue;
+		if ((rect.left + rect.right) / 2 < window.innerWidth / 2) minLeft = Math.max(minLeft, rect.right + 12);
+		else maxRight = Math.min(maxRight, rect.left - 12);
+	}
+	if (maxRight - minLeft < bounds.width) { minLeft = 12; maxRight = window.innerWidth - 12; }
+	const shift = Math.max(minLeft, Math.min(bounds.left, maxRight - bounds.width)) - bounds.left;
+	bubble.style.setProperty('--popover-shift', `${shift}px`);
+}
+function setTitlePopover(id) {
+	openTitlePopover = id;
+	for (const item of el.titleStatus.querySelectorAll('.title-item')) {
+		const open = item.dataset.titleId === id;
+		item.querySelector('.title-popover').classList.toggle('hidden', !open);
+		item.querySelector('.title-icon-button').setAttribute('aria-expanded', String(open));
+	}
+	positionTitlePopover();
+}
+function renderTitleStatus() {
+	const leaders = provisionalTitleLeaders(engine.state, engine.titleRules);
+	el.titleStatus.classList.toggle('hidden', leaders.length === 0);
+	if (!leaders.some(({ id }) => id === openTitlePopover)) openTitlePopover = null;
+	el.titleStatus.replaceChildren();
+	for (const { id, playerIds } of leaders) {
+		const item = document.createElement('div');
+		item.className = 'title-item';
+		item.dataset.titleId = id;
+		const button = document.createElement('button');
+		button.className = 'title-icon-button';
+		button.type = 'button';
+		button.setAttribute('aria-label', t(`title.${id}`));
+		button.setAttribute('aria-expanded', String(openTitlePopover === id));
+		const icon = document.createElement('img');
+		icon.src = `assets/icons/title-${id.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}.svg`;
+		icon.alt = '';
+		icon.setAttribute('aria-hidden', 'true');
+		button.append(icon);
+		button.onclick = () => setTitlePopover(openTitlePopover === id ? null : id);
+		const scores = document.createElement('div');
+		scores.className = 'title-leaders';
+		for (const playerId of playerIds) {
+			const index = engine.state.players.findIndex(player => player.id === playerId);
+			if (index < 0) continue;
+			const bonus = document.createElement('span');
+			bonus.textContent = '+10';
+			bonus.style.color = playerColor(index);
+			bonus.setAttribute('aria-label', t('title.provisional', { player: displayPlayerName(engine.state.players[index]) }));
+			scores.append(bonus);
+		}
+		const bubble = document.createElement('div');
+		bubble.className = `title-popover${openTitlePopover === id ? '' : ' hidden'}`;
+		bubble.setAttribute('role', 'note');
+		const name = document.createElement('strong');
+		name.textContent = t(`title.${id}`);
+		const description = document.createElement('p');
+		description.textContent = t(`title.${id}Description`);
+		const bonus = document.createElement('p');
+		bonus.className = 'title-popover-bonus';
+		bonus.textContent = t('title.endBonus');
+		bubble.append(name, description, bonus);
+		item.append(button, scores, bubble);
+		el.titleStatus.append(item);
+	}
+	positionTitlePopover();
+}
 function renderScores() {
+	prepareLiveScoreAnimations();
 	el.scores.replaceChildren();
+	scoreElements = new Map();
+	crownElements = new Map();
 	engine.state.players.forEach((player, index) => {
 		const row = document.createElement('div'),
 			name = document.createElement('span'),
+			identity = document.createElement('div'),
 			score = document.createElement('strong'),
 			meeples = document.createElement('small'),
-			chips = document.createElement('small');
+			chips = document.createElement('small'),
+			supports = document.createElement('small'),
+			scoreSummary = document.createElement('small');
 		row.className = `player-box${!engine.state.finished && index === engine.state.turn ? ' active-player-box' : ''}`;
+		row.style.setProperty('--player-color', playerColor(index));
+		identity.className = 'player-identity';
 		name.textContent = displayPlayerName(player);
-		score.textContent = player.score;
+		identity.append(name);
+		const rank = finalScoreReveal?.ranks.get(player.id);
+		if (engine.state.finished && rank) {
+			const crown = document.createElement('img');
+			crown.className = `player-crown${finalScoreReveal.unlocked.has(player.id) ? '' : ' hidden'}`;
+			crown.src = `assets/icons/crown-${rank}.svg`;
+			crown.alt = '';
+			crown.setAttribute('aria-hidden', 'true');
+			identity.append(crown);
+			crownElements.set(player.id, crown);
+		}
+		score.className = 'player-score-value';
+		score.textContent = displayedScores.get(player.id) ?? player.score;
+		scoreElements.set(player.id, score);
 		meeples.className = 'player-meeple-count';
-		meeples.append(`${t('player.meeples')} `, meepleCounter(player.meeples, index, { compact: true }));
-		chips.textContent = t('player.chips', { count: player.vertexChips });
-		chips.className = 'chip-counts';
-		row.append(name, score, meeples, chips);
+		meeples.setAttribute('aria-label', `${t('player.meeples')}: ${player.meeples}`);
+		meeples.append(meepleCounter(player.meeples, index, { compact: true }));
+		chips.textContent = t('player.vertexCompletions', { count: player.vertexCompletions });
+		chips.className = `chip-counts${engine.titleRules.vertexKing ? '' : ' hidden'}`;
+		supports.textContent = t('player.supportCount', { count: player.supportCount });
+		supports.className = 'support-counts';
+		scoreSummary.className = `player-score-summary${engine.state.finished && finalScoreReveal && !finalScoreReveal.active && !replay ? '' : ' hidden'}`;
+		const completedTotal = engine.state.scoreEvents.filter(event => event.playerId === player.id && event.reason === 'complete').reduce((sum, event) => sum + event.points, 0);
+		const endTotal = engine.state.scoreEvents.filter(event => event.playerId === player.id && event.reason === 'end').reduce((sum, event) => sum + event.points, 0);
+		const titleTotal = engine.state.scoreEvents.filter(event => event.playerId === player.id && event.reason === 'title').reduce((sum, event) => sum + event.points, 0);
+		const summaryItems = [['score.completeShort', String(completedTotal)], ['score.endShort', `+${endTotal}`]];
+		if (titleTotal) summaryItems.push(['score.titleShort', `+${titleTotal}`]);
+		for (const [key, value] of summaryItems) {
+			const item = document.createElement('span'), label = document.createElement('small'), number = document.createElement('strong');
+			label.textContent = t(key); number.textContent = value; item.append(label, number); scoreSummary.append(item);
+		}
+		row.append(identity, score, meeples, chips, supports, scoreSummary);
 		row.onpointerenter = () => {
 			hoveredPlayerIndex = index;
 			view.highlightPlayerIndex = index;
@@ -440,22 +740,46 @@ function renderScores() {
 		el.scores.append(row);
 	});
 	el.finalScoreDetails.replaceChildren();
-	el.finalScoreDetails.classList.toggle('hidden', !engine.state.finished);
+	el.finalScoreDetails.classList.toggle('hidden', !engine.state.finished || !logOpen || Boolean(replay) || finalScoreReveal?.active || finalPanelMode !== 'scores');
 	if (!engine.state.finished) return;
-	engine.state.players.forEach((player) => {
-		const title = document.createElement('h3'), list = document.createElement('ul'), events = engine.state.scoreEvents.filter((event) => event.playerId === player.id);
-		title.textContent = t('score.total', { player: displayPlayerName(player), score: player.score });
+	engine.state.players.forEach((player, index) => {
+		const section = document.createElement('section'), list = document.createElement('ul'), events = engine.state.scoreEvents.filter((event) => event.playerId === player.id);
+		section.className = 'final-player-result';
+		section.dataset.playerIndex = String(index);
+		section.style.setProperty('--player-color', playerColor(index));
 		if (!events.length) {
 			const item = document.createElement('li'); item.textContent = t('score.none'); list.append(item);
 		}
 		events.forEach((event) => {
 			const item = document.createElement('li'), label = document.createElement('span'), points = document.createElement('strong');
-			label.textContent = t('score.event', { reason: t(event.reason === 'end' ? 'score.end' : 'score.complete'), feature: t(`feature.${event.type}`) });
+			label.textContent = event.reason === 'title'
+				? t('score.titleEvent', { title: t(`title.${event.titleId}`) })
+				: t('score.event', { reason: t(event.reason === 'end' ? 'score.end' : 'score.complete'), feature: t(`feature.${event.type}`) });
 			points.textContent = `+${event.points}`;
 			item.append(label, points); list.append(item);
 		});
-		el.finalScoreDetails.append(title, list);
+		section.append(list);
+		el.finalScoreDetails.append(section);
 	});
+}
+function renderFinalLogSections() {
+	const finished = engine.state.finished && !replay;
+	el.logTitle.classList.toggle('hidden', finished);
+	el.logSectionToggle.classList.toggle('hidden', !finished);
+	el.scoreSectionToggle.classList.toggle('hidden', !finished || finalScoreReveal?.active);
+	if (!finished) {
+		el.logSection.classList.remove('hidden');
+		el.finalScoreDetails.classList.add('hidden');
+		return;
+	}
+	const showingLog = finalPanelMode === 'log';
+	const showingScores = finalPanelMode === 'scores';
+	el.logSectionToggle.textContent = `${showingLog ? '▼' : '▶'} ${t('log.title')}`;
+	el.scoreSectionToggle.textContent = `${showingScores ? '▼' : '▶'} ${t('score.details')}`;
+	el.logSectionToggle.setAttribute('aria-expanded', String(logOpen && showingLog));
+	el.scoreSectionToggle.setAttribute('aria-expanded', String(logOpen && showingScores));
+	el.logSection.classList.toggle('hidden', !logOpen || !showingLog);
+	el.finalScoreDetails.classList.toggle('hidden', !logOpen || !showingScores || finalScoreReveal?.active);
 }
 function displayPlayerName(player) {
 	const match = /^Player (\d+)$/.exec(player.name);
@@ -463,32 +787,58 @@ function displayPlayerName(player) {
 }
 function renderPlacementActions() {
 	const tile = provisional || (engine.state.phase === 'placeMeeple' ? engine.state.currentTile : null);
-	if (!tile || engine.state.finished) {
+	if (!tile || engine.state.finished || tileMotion?.busy) {
 		el.placementActions.classList.add('hidden');
 		return;
 	}
 	const point = view.screenFromWorldPoint({ x: tile.centerX, y: tile.centerY + side * .82 });
+	const possible = possiblePlacementControls();
 	el.placementActions.style.left = `${point.x}px`;
 	el.placementActions.style.top = `${point.y}px`;
 	el.placementActions.classList.remove('hidden');
-	el.rotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !alternatePlacement());
-	el.terrainRotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !terrainAlternatePlacement());
-	el.terrainMirror.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !terrainMirrorAlternatePlacement());
+	// 同じ仮置き位置で到達できる全パターンを調べ、どこかで使う操作は
+	// 最初から表示する。一方、現在の状態で使えない操作は無効表示にする。
+	el.rotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.rotate);
+	el.terrainRotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.terrainRotate);
+	el.terrainMirror.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.terrainMirror);
 	el.confirm.classList.toggle('hidden', engine.state.phase !== 'placeTile');
 	el.skip.classList.toggle('hidden', engine.state.phase !== 'placeMeeple');
 	el.confirm.disabled = !provisional;
 	el.skip.disabled = engine.state.phase !== 'placeMeeple';
+	el.rotate.disabled = engine.state.phase !== 'placeTile' || !alternatePlacement();
+	el.terrainRotate.disabled = engine.state.phase !== 'placeTile' || !terrainAlternatePlacement();
+	el.terrainMirror.disabled = engine.state.phase !== 'placeTile' || !terrainMirrorAlternatePlacement();
+	const half = el.placementActions.offsetWidth / 2;
+	el.placementActions.style.left = `${Math.max(half + 12, Math.min(view.width - half - 12, point.x))}px`;
+	el.placementActions.style.top = `${Math.max(140, Math.min(view.height - 90, point.y))}px`;
 }
 function render() {
 	if (engine.state.finished && replayedEngine !== engine) startReplay();
 	const { state } = engine,
 		player = engine.activePlayer,
-		handTile = state.phase === 'placeTile' ? state.currentTile : null,
 		searchPending = structuralSearchPending && state.phase === 'placeTile';
+	const logToggle=document.querySelector('#toggle-log'), logToggleLabel=t(logOpen?'log.close':'log.open');
+	logToggle.setAttribute('aria-expanded',String(logOpen));
+	logToggle.setAttribute('aria-label',logToggleLabel);
+	logToggle.title=logToggleLabel;
+	el.currentHand.dataset.playerIndex = String(state.turn);
+	const table=document.querySelector('.game-table');
+	table.classList.toggle('game-finished', state.finished);
+	table.classList.toggle('private-planning',engine.privatePlanning);
+	updatePublicHandLayout();
+	const handTile = !engine.privatePlanning && !state.finished && state.phase === 'placeTile' && !provisional && !tileMotion?.busy ? state.currentTile : null;
+	el.currentHand.classList.toggle('hidden', !handTile || Boolean(replay));
+	if (handTile && view) {
+		const ctx = el.currentTile.getContext('2d');
+		ctx.setTransform(1, 0, 0, 1, 0, 0);
+		ctx.clearRect(0, 0, el.currentTile.width, el.currentTile.height);
+		const rect = el.currentTile.getBoundingClientRect();
+		ctx.setTransform(el.currentTile.width / Math.max(1, rect.width), 0, 0, el.currentTile.height / Math.max(1, rect.height), 0, 0);
+		const displayTile = handDisplayTile(handTile);
+		const layout = handTileLayout(displayTile, rect.width, rect.height);
+		view.drawTileAtScreen(ctx, displayTile, layout.x, layout.y, layout.side);
+	}
 	el.activeLabel.textContent = state.finished ? t('game.over') : t('game.playerShort', { number: state.turn + 1 });
-	const replayStatus = document.querySelector('#replay-status');
-	replayStatus.classList.toggle('hidden', !replay);
-	replayStatus.textContent = replay ? t('log.replay') : '';
 	el.replayButton.classList.toggle('hidden', !state.finished || Boolean(replay) || !replayComplete);
 	el.replayButton.disabled = Boolean(replay);
 	el.heading.textContent = state.finished
@@ -496,79 +846,135 @@ function render() {
 		: state.phase === 'placeMeeple'
 			? t('game.placeMeeple')
 			: t('game.turn', { player: displayPlayerName(player) });
-	el.score.textContent = player.score;
-	el.meeples.replaceChildren(meepleCounter(player.meeples, state.turn));
+	if(engine.privatePlanning && !state.finished && state.phase==='placeTile' && !searchPending && !candidates.length && state.deck.length) el.heading.textContent=t('hand.redrawNeeded');
+	updateSearchStatus();
 	el.thin.textContent = state.deck.filter((tile) => tile.shape === 'thin').length;
 	el.fat.textContent = state.deck.filter((tile) => tile.shape === 'fat').length;
-	el.tileLabel.textContent = handTile
-		? `${handTile.shape.toUpperCase()} · ${handTile.idPrefix.replaceAll('-', ' ')}`
-		: state.finished
-			? t('game.allTilesProcessed')
-			: t('game.placeMeeplePrompt');
-	drawTilePreview(handTile);
-	el.current.classList.toggle('hidden', Boolean(provisional) || state.phase !== 'placeTile');
 	el.redo.classList.toggle('hidden', !provisional);
 	const noRegular = !searchPending && candidates.length === 0;
-	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || (!noRegular && player.redrawUsed) || Boolean(provisional);
-	el.redraw.textContent = t(noRegular ? 'tile.redrawNoCandidate' : 'tile.redraw');
+	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || !state.deck.length || (!noRegular && player.redrawUsed) || Boolean(provisional);
+	el.redraw.textContent = t('ui.redraw');
+	el.redraw.title = t(noRegular ? 'tile.redrawNoCandidate' : 'tile.redraw');
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
-	el.mirror.disabled = searchPending || state.phase !== 'placeTile' || player.mirrorUsed || Boolean(provisional);
-	el.mirror.classList.toggle('hidden', engine.rules.allowTerrainMirror || state.phase !== 'placeTile' || Boolean(provisional));
-	el.forceEnd.disabled = state.finished;
+	el.forceEnd.disabled = state.finished || searchPending;
+	if (tileMotion?.busy) el.redraw.disabled = true;
 	view.options.placed = state.board.tiles;
-	view.options.candidates = state.phase === 'placeTile' ? allCandidates() : [];
+	const visibleCandidates = engine.privatePlanning && tileMotion?.active?.sourceTile
+		? candidatesForHandTile(candidates,tileMotion.active.sourceTile) : candidates;
+	view.options.candidates = state.phase === 'placeTile' ? engine.privatePlanning ? uniqueCandidatePositions(visibleCandidates) : allCandidates() : [];
 	// ミープル配置中も、直前のタイル配置から導かれた確定配置は盤面情報として
 	// 継続表示する。手札の通常候補だけをタイル配置フェーズ限定にする。
 	view.options.structuralCandidates = (state.phase === 'placeTile' || state.phase === 'placeMeeple')
 		? engine.deferCandidateSearch ? progressiveForcedCandidates : engine.structuralCandidates()
 		: [];
 	view.candidatesVisible = true;
-	view.previewTile = provisional || dragPreview;
+	view.previewTile = provisional;
 	// 仮置きの外周と、確定直後のミープル候補を手番プレイヤーの色で示す。
 	// ドラッグ中の自由プレビューは候補として未確定なので縁取りしない。
 	view.previewOutlineColor = provisional ? playerColor(state.turn) : null;
 	view.featureMarkers = meepleMarkers();
+	view.featureMarkerPlayerIndex = state.turn;
 	view.featureMarkerColor = state.phase === 'placeMeeple' ? playerColor(state.turn) : null;
 	view.meeples = placedMeeples();
 	view.highlightPlayerIndex = hoveredPlayerIndex ?? (state.phase === 'placeTile' ? state.turn : null);
 	renderMeepleOptions();
 	renderScores();
+	publicHands.render({engine,view,scoreboard:el.scores,blocked:searchPending || Boolean(tileMotion?.busy) || !gameStarted,provisional,heldTile:tileMotion?.active?.sourceTile,hidden:Boolean(replay) || state.finished});
+	renderTitleStatus();
 	renderLog();
+	renderFinalLogSections();
 	applyHistoryDisplay();
 	el.scores.classList.toggle('hidden', Boolean(replay));
-	el.score.classList.toggle('hidden', Boolean(replay));
 	if (replay) el.finalScoreDetails.classList.add('hidden');
-	el.startDeck.disabled = Boolean(replay);
+	el.startDeck.disabled = Boolean(replay) || searchPending;
 	view.render();
 	renderPlacementActions();
+	tileMotion?.draw();
 }
-function logText(entry) {
-	const player = engine.state.players.find((p) => p.id === entry.playerId);
-	const actions = [t('log.tile')];
+function updatePublicHandLayout() {
+	const handWidth=innerWidth<=800?228:240;
+	const logWidth=logOpen?document.querySelector('#log-area').getBoundingClientRect().width+78:0;
+	document.querySelector('.game-table').classList.toggle('public-hands-compact',engine.privatePlanning && (innerWidth-logWidth<handWidth*2+64 || innerHeight<630));
+}
+function logPlayerIndex(playerId) { return Math.max(0, engine.state.players.findIndex(player => player.id === playerId)); }
+function logText(entry, displayNumber = entry.number) {
+	const player = engine.state.players.find(p => p.id === entry.playerId), actions = [`${entry.tileShape === 'fat' ? 'FAT' : 'THIN'}${t('log.tile')}`];
 	if (entry.placedMeeple) actions.push(t('log.meeple', { feature: t(`feature.${entry.placedMeeple.split(':')[1]}`) }));
-	for (const score of entry.scores || []) {
-		const owner = engine.state.players.find((p) => p.id === score.playerId);
-		actions.push(t('log.completed', { feature: t(`feature.${score.type}`), points: score.points }) + (score.playerId !== entry.playerId ? ` (${displayPlayerName(owner)})` : ''));
+	for (const score of entry.scores || []) if (score.reason !== 'end') actions.push(`${t('log.completed', { feature: t(`feature.${score.type}`)})} ${t('log.points', { points: score.points })}`);
+	return `${displayNumber}. ${displayPlayerName(player)}: ${actions.join(' / ')}`;
+}
+function appendLogPlayerName(parent, playerId) {
+	const player = engine.state.players.find(item => item.id === playerId), index = logPlayerIndex(playerId), name = document.createElement('span');
+	name.className = 'log-player-name'; name.style.color = playerColor(index); name.textContent = displayPlayerName(player);
+	parent.append(name);
+}
+function appendLogEntryContent(button, entry, displayNumber) {
+	const playerIndex = logPlayerIndex(entry.playerId), player = engine.state.players[playerIndex];
+	button.append(document.createTextNode(`${displayNumber}. `));
+	appendLogPlayerName(button, entry.playerId);
+	button.append(document.createTextNode(': '));
+	const tileIcon = document.createElement('img');
+	tileIcon.className = 'log-tile-icon'; tileIcon.src = `assets/icons/${entry.tileShape === 'fat' ? 'fat' : 'thin'}.svg`; tileIcon.alt = entry.tileShape === 'fat' ? 'FAT' : 'THIN';
+	button.append(tileIcon, document.createTextNode(t('log.tile')));
+	if (entry.placedMeeple) {
+		const type = entry.placedMeeple.split(':')[1], icon = document.createElement('img');
+		icon.className = 'log-meeple-icon'; icon.src = meepleAssetForPlayer(meepleKindForFeature(type), playerIndex); icon.alt = '';
+		button.append(document.createTextNode(' / '), icon, document.createTextNode(t('log.meeple', { feature: t(`feature.${type}`) })));
 	}
-	return `${entry.number}. ${displayPlayerName(player)}: ${actions.join(' / ')}`;
+	const grouped = new Map();
+	for (const score of entry.scores || []) {
+		if (score.reason === 'end') continue;
+		const key = `${score.tileId}:${score.type}:${score.reason}:${score.points}`;
+		if (!grouped.has(key)) grouped.set(key, { ...score, playerIds: [] });
+		grouped.get(key).playerIds.push(score.playerId);
+	}
+	for (const score of grouped.values()) {
+		button.append(document.createTextNode(' / '), document.createTextNode(t('log.completed', { feature: t(`feature.${score.type}`) })));
+		for (const playerId of score.playerIds) {
+			const points = document.createElement('span');
+			points.className = 'log-score-points'; points.style.color = playerColor(logPlayerIndex(playerId));
+			points.textContent = t('log.points', { points: score.points }); button.append(points);
+		}
+	}
+	button.setAttribute('aria-label', logText(entry, displayNumber));
 }
 function renderLog() {
 	const entries = engine.state.turnHistory || [];
-	const signature = `${entries.length}:${t('log.title')}:${Boolean(replay)}`;
+	const redrawLogEvents=engine.state.events.filter(event=>event.type==='redraw' || event.type==='pass').map(event=>({...event}));
+	const signature = `${entries.length}:${redrawLogEvents.length}:${t('log.title')}:${Boolean(replay)}`;
 	if (signature === logSignature) return;
 	logSignature = signature;
 	const list = document.querySelector('#play-log');
 	const atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 10;
 	list.replaceChildren();
+	let displayNumber = 1;
+	const appendRedraws = beforeTurn => {
+		for (const event of redrawLogEvents) {
+			if (event.turnNumber !== beforeTurn || event.rendered) continue;
+			const row = document.createElement('li'), message = document.createElement('span');
+			row.className = 'log-redraw'; message.append(document.createTextNode(`${displayNumber++}. `));
+			appendLogPlayerName(message, event.playerId); message.append(document.createTextNode(`: ${t(event.type==='pass'?'log.pass':'log.redraw')}`));
+			row.append(message); list.append(row); event.rendered = true;
+		}
+	};
+	redrawLogEvents.forEach(event => { event.rendered = false; });
 	for (const entry of entries) {
+		appendRedraws(entry.number);
 		const row = document.createElement('li'), button = document.createElement('button');
-		button.textContent = logText(entry);
+		appendLogEntryContent(button, entry, displayNumber++);
 		button.disabled = Boolean(replay);
 		const show = () => { if (replay) return; historyHover = entry; applyHistoryDisplay(); view.render(); };
 		const hide = () => { historyHover = null; applyHistoryDisplay(); view.render(); };
 		button.onpointerenter = show; button.onpointerleave = hide;
 		button.onfocus = show; button.onblur = hide;
 		row.append(button); list.append(row);
+	}
+	for (const event of redrawLogEvents) {
+		if (event.rendered) continue;
+		const row = document.createElement('li'), message = document.createElement('span');
+		row.className = 'log-redraw'; message.append(document.createTextNode(`${displayNumber++}. `));
+		appendLogPlayerName(message, event.playerId); message.append(document.createTextNode(`: ${t(event.type==='pass'?'log.pass':'log.redraw')}`));
+		row.append(message); list.append(row); event.rendered = true;
 	}
 	if (atBottom) list.scrollTop = list.scrollHeight;
 }
@@ -593,14 +999,15 @@ function applyHistoryDisplay() {
 function startReplay() {
 	if (!engine.state.finished || replay) return;
 	clearTimeout(replayTimer);
+	resetScorePresentation();
 	replayedEngine = engine;
 	replayComplete = false;
 	historyHover = null;
-	tileDragging = false;
 	view.drag = null; view.pinch = null; view.touchPoints.clear();
 	view.interactionLocked = true;
 	view.replayTiles = engine.state.board.tiles;
 	view.fitTiles(view.replayTiles);
+	syncLogCameraOffset(true);
 	replay = { tileCount: 1, meeples: {} };
 	const frames = (engine.state.turnHistory || []).flatMap((entry) => [
 		{ tileCount: entry.tileCount, meeples: entry.meeples },
@@ -615,6 +1022,7 @@ function startReplay() {
 			replay = null; replayTimer = null;
 			replayComplete = true;
 			view.interactionLocked = false; view.replayTiles = null;
+			startFinalScoreReveal();
 		}
 		render();
 		if (replay) replayTimer = setTimeout(advance, interval);
@@ -623,116 +1031,152 @@ function startReplay() {
 }
 function startSelectedDeck() {
 	if (replay) return;
+	stopPreviewDrop();
+	closeHandChoice();
+	finalPanelMode = 'scores';
+	tileMotion.cancel(true);
+	gameStarted = true;
+	showSettings(false);
+	view.reset();
+	logCameraOffset = 0;
+	setPlayerMeepleColors(playerColorSettings.map(({ select }, index) => Number(select.value) || selectedMeepleColor(index)));
 	clearTimeout(replayTimer);
 	historyHover = null; replayComplete = false; logSignature = '';
 	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
 	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
 	gameRules.allowTerrainMirror = el.terrainMirrorMode.value === 'unlimited';
-	engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, deckType: el.deck.value, rules: gameRules, deferCandidateSearch: el.progressiveFrontier.checked });
+	gameRules.ignoreMatchingRules = el.matchingRuleMode.value === 'ignore';
+	const fieldScoring = el.fieldRuleMode.value !== 'disabled';
+	const titles = Object.fromEntries([...titleRuleSettings].map(([id, select]) => [id, select.value === 'on']));
+	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value });
+	resetScorePresentation();
 	provisional = null;
-	dragPreview = null;
 	resetProgressiveDisplay();
 	refreshCandidates();
+	view.fitTiles([...engine.state.board.tiles, ...candidates]);
+	syncLogCameraOffset(true);
 	render();
 }
 function placeMeeple(option) {
 	if (engine.state.phase !== 'placeMeeple') return;
 	engine.placeMeeple(option);
 	provisional = null;
-	dragPreview = null;
 	refreshCandidates();
 	render();
 }
-function boardWorldPoint(event) {
-	const rect = el.board.getBoundingClientRect();
-	if (
-		event.clientX < rect.left ||
-		event.clientX > rect.right ||
-		event.clientY < rect.top ||
-		event.clientY > rect.bottom
-	)
-		return null;
-	return view.worldPoint({ x: event.clientX - rect.left, y: event.clientY - rect.top });
+tileMotion = new TileDrag({
+	view, overlay: document.querySelector('#held-tile'), hand: el.currentTile,
+	getTile: () => engine.state.currentTile,
+	getCandidates: tile => engine.privatePlanning ? candidatesForHandTile(candidates,tile) : candidates,
+	canStart: () => gameStarted && !replay && !structuralSearchPending && engine.state.phase === 'placeTile',
+	onPreview: tile => { stopPreviewDrop(); provisional = tile; },
+	onChange: () => render(),
+});
+const settings = document.querySelector('#settings-screen');
+function showSettings(show) {
+	if (show) { tileMotion.cancel(true); closeHandChoice(); }
+	settings.classList.toggle('hidden', !show);
+	for (const element of document.querySelector('.game-table').children) if (element !== settings && element !== confirmDialog) element.inert = show;
+	view.interactionLocked = show || Boolean(replay);
+	document.querySelector('#close-settings').classList.toggle('hidden', !gameStarted);
+	if (show) el.player1Color.focus({ preventScroll: true });
+	else document.querySelector('#open-settings').focus();
 }
-function updateTileDrag(event) {
-	view.previewOutlineColor = null;
-	const world = boardWorldPoint(event);
-	if (!world) {
-		dragPreview = null;
-		render();
-		return null;
-	}
-	const near = allCandidates()
-		.filter(
-			(candidate) =>
-				Math.hypot(candidate.centerX - world.x, candidate.centerY - world.y) < side * 0.65,
-		)
-		.sort(
-			(a, b) =>
-				Math.hypot(a.centerX - world.x, a.centerY - world.y) -
-				Math.hypot(b.centerX - world.x, b.centerY - world.y),
-		)[0];
-	dragPreview = near || {
-		...engine.state.currentTile,
-		centerX: world.x,
-		centerY: world.y,
-	};
-	view.previewTile = dragPreview;
-	view.render();
-	return near;
+const confirmDialog = document.querySelector('#confirm-dialog');
+let resolveConfirmDialog = null;
+function showConfirmDialog({ title, message, confirmText = t('ui.continue'), cancelText = t('ui.cancel') }) {
+	return new Promise(resolve => {
+		resolveConfirmDialog = resolve;
+		document.querySelector('#confirm-dialog-title').textContent = title;
+		document.querySelector('#confirm-dialog-message').textContent = message;
+		document.querySelector('#confirm-dialog-accept').textContent = confirmText;
+		document.querySelector('#confirm-dialog-cancel').textContent = cancelText;
+		confirmDialog.showModal();
+	});
 }
-function finishTileDrag(event) {
-	const snapped = updateTileDrag(event);
-	tileDragging = false;
-	dragPreview = null;
-	if (snapped) {
-		provisional = snapped;
-	}
+function closeConfirmDialog(accepted) {
+	if (!confirmDialog.open) return;
+	confirmDialog.close();
+	const resolve = resolveConfirmDialog;
+	resolveConfirmDialog = null;
+	resolve?.(accepted);
+}
+document.querySelector('#confirm-dialog-accept').onclick = () => closeConfirmDialog(true);
+document.querySelector('#confirm-dialog-cancel').onclick = () => closeConfirmDialog(false);
+confirmDialog.addEventListener('cancel', event => { event.preventDefault(); closeConfirmDialog(false); });
+function selectedColorsHaveDuplicates(count = Number(el.playerCount.value) || 2) {
+	const colors = playerColorSettings.slice(0, count).map(({ select }, index) => Number(select.value) || selectedMeepleColor(index));
+	return new Set(colors).size !== colors.length;
+}
+async function confirmDuplicateColors(count) {
+	if (!selectedColorsHaveDuplicates(count)) return true;
+	return showConfirmDialog({ title: t('setup.duplicateColorsTitle'), message: t('setup.duplicateColorsMessage') });
+}
+async function resumeFromSettings() {
+	if (gameStarted && !await confirmDuplicateColors(engine.state.players.length)) return;
+	showSettings(false);
+}
+document.querySelector('#open-settings').onclick = () => showSettings(true);
+document.querySelector('#close-settings').onclick = resumeFromSettings;
+document.querySelector('#toggle-log').onclick = () => {
+	const open = document.querySelector('#log-area').classList.toggle('hidden') === false;
+	logOpen = open;
+	document.querySelector('.game-table').classList.toggle('log-open', open);
+	syncLogCameraOffset();
 	render();
-}
-el.current.addEventListener('pointerdown', (event) => {
-	if (engine.state.phase !== 'placeTile' || provisional) return;
-	tileDragging = true;
-	el.current.setPointerCapture(event.pointerId);
-	event.preventDefault();
+	window.setTimeout(positionTitlePopover, 180);
+};
+document.addEventListener('click', event => {
+	if (!openTitlePopover || event.target.closest('.title-icon-button, .title-popover')) return;
+	setTitlePopover(null);
 });
-window.addEventListener('pointermove', (event) => {
-	if (tileDragging) updateTileDrag(event);
+document.addEventListener('pointerdown',event=>{
+	if(handChoicePosition && !el.handChoice.contains(event.target)) closeHandChoice();
+},true);
+document.querySelector('#close-hand-choice').onclick=closeHandChoice;
+el.logSectionToggle.onclick = () => { finalPanelMode = finalPanelMode === 'log' ? 'none' : 'log'; renderScores(); renderFinalLogSections(); };
+el.scoreSectionToggle.onclick = () => { finalPanelMode = finalPanelMode === 'scores' ? 'none' : 'scores'; renderScores(); renderFinalLogSections(); };
+window.addEventListener('keydown', event => {
+	if (event.key !== 'Escape') return;
+	if (handChoicePosition) { closeHandChoice(); return; }
+	if (openTitlePopover) { setTitlePopover(null); return; }
+	if (tileMotion.busy) tileMotion.cancel();
+	else if (gameStarted && !settings.classList.contains('hidden')) resumeFromSettings();
+	else if (provisional) { stopPreviewDrop(); provisional = null; render(); }
 });
-window.addEventListener('pointerup', (event) => {
-	if (tileDragging) finishTileDrag(event);
-});
-document.querySelector('#reset-view').onclick = () => view.reset();
+document.querySelector('#reset-view').onclick = () => { view.reset(); syncLogCameraOffset(true); };
+window.addEventListener('resize', () => { syncLogCameraOffset(); render(); positionTitlePopover(); });
 bindLanguageSelect(el.language);
 applyTranslations();
 window.addEventListener('penrosanne-language-change', () => {
 	renderDeckOptions();
+	renderMeepleColorOptions();
 	render();
 });
-document.querySelector('#vertex-toggle').onchange = (event) => {
-	showVertices = event.target.checked;
-	view.render();
-};
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
 el.progressiveFrontier.onchange = () => {
 	// 実行中の探索は中断せず、切替後のモードは次の候補探索から適用する。
 	if (structuralSearchPending) return;
-	if (el.progressiveFrontier.checked && !engine.deferCandidateSearch && engine.state.phase === 'placeTile') {
-		// 通常表示から切り替えた場合も、すでに見えている確定配置を基準にする。
-		progressiveForcedCandidates = engine.structuralCandidates();
-	}
 	refreshCandidates();
 	render();
 };
-el.startDeck.onclick = startSelectedDeck;
-el.replayButton.onclick = () => { startReplay(); render(); };
+el.startDeck.onclick = async () => {
+	if (!await confirmDuplicateColors()) return;
+	startSelectedDeck();
+};
+playerColorSettings.forEach(({ select }) => { select.onchange = updateMeepleColorSettings; });
+el.playerCount.onchange = updatePlayerCountSettings;
+el.replayButton.onclick = () => { tileMotion.cancel(true); startReplay(); render(); };
 el.redo.onclick = () => {
+	closeHandChoice();
+	stopPreviewDrop();
 	provisional = null;
 	render();
 };
 el.rotate.onclick = () => {
 	const alternate = alternatePlacement();
 	if (alternate) {
+		stopPreviewDrop();
 		provisional = alternate;
 		render();
 	}
@@ -740,6 +1184,7 @@ el.rotate.onclick = () => {
 el.terrainRotate.onclick = () => {
 	const alternate = terrainAlternatePlacement();
 	if (alternate) {
+		stopPreviewDrop();
 		provisional = alternate;
 		render();
 	}
@@ -747,19 +1192,20 @@ el.terrainRotate.onclick = () => {
 el.terrainMirror.onclick = () => {
 	const alternate = terrainMirrorAlternatePlacement();
 	if (alternate) {
+		stopPreviewDrop();
 		provisional = alternate;
 		render();
 	}
 };
 el.confirm.onclick = () => {
 	if (!provisional) return;
+	stopPreviewDrop();
 	const { _candidateKey, ...placement } = provisional;
 	// 確定枠の位置へ実タイルを置いた場合は、その枠だけを盤面表示から外す。
 	// ほかの既知の確定配置はそのまま残るため、追加分のアニメーションは発生しない。
 	removeProgressiveForcedCandidate(placement);
 	engine.placeTile(placement);
 	provisional = null;
-	dragPreview = null;
 	refreshCandidates();
 	render();
 };
@@ -769,26 +1215,23 @@ el.skip.onclick = () => {
 	refreshCandidates();
 	render();
 };
-el.redraw.onclick = () => {
-	engine.redrawCurrentTile();
+function redrawHandTile(tileId) {
+	if (structuralSearchPending || tileMotion?.busy || provisional) return;
+	engine.redrawCurrentTile(tileId);
 	provisional = null;
-	dragPreview = null;
 	refreshCandidates();
 	render();
-};
-el.mirror.onclick = () => {
-	engine.mirrorCurrentTile();
-	provisional = null;
-	dragPreview = null;
-	refreshCandidates();
-	render();
-};
+}
+el.redraw.onclick = () => redrawHandTile();
 el.forceEnd.onclick = () => {
+	tileMotion.cancel(true);
+	gameStarted = true;
+	showSettings(false);
 	engine.finishGame();
 	provisional = null;
-	dragPreview = null;
 	refreshCandidates();
 	render();
 };
 refreshCandidates();
 render();
+showSettings(true);

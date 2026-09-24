@@ -1,145 +1,67 @@
 <!doctype html>
 <html lang="ja">
-	<head>
-		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title data-i18n="page.gameTitle">Penrosanne — 描画プロトタイプ</title>
-		<link rel="stylesheet" href="styles.css" />
-	</head>
-	<body>
-		<main class="app-shell">
-			<header class="topbar">
-				<a class="brand" href="#" data-i18n-aria-label="nav.home" aria-label="Penrosanne ホーム"
-					>PENROSANNE <span>prototype</span></a
-				>
-				<div class="status"><i></i> <span data-i18n="status.game">描画・操作プロトタイプ</span></div>
-				<a class="topbar-link" href="tile-gallery.html" data-i18n="nav.gallery">タイル一覧・デバッグ</a>
-				<label class="language-switch"><span data-i18n="language.label">表示言語</span><select id="language-select" data-i18n-aria-label="language.label" aria-label="表示言語"><option value="ja" data-i18n="language.ja">日本語</option><option value="en" data-i18n="language.en">English</option></select></label>
-				<button
-					id="reset-view"
-					class="icon-button"
-					data-i18n-title="nav.resetView" title="表示をリセット"
-					data-i18n-aria-label="nav.resetView" aria-label="表示をリセット"
-				>
-					◎
-				</button>
-			</header>
-
-			<section class="workspace">
-				<aside class="left-panel panel">
-					<p id="active-player-label" class="eyebrow">PLAYER 01</p>
-					<h1 id="turn-heading"></h1>
-					<div class="score-row"><span data-i18n="player.score">確定得点</span><strong>12</strong></div>
-					<div class="meeple-row">
-						<span data-i18n="player.meeples">残りミープル</span>
-						<div id="meeple-count" class="meeples" data-i18n-aria-label="player.meeples" aria-label="残りミープル">● ● ● ● ● ● ●</div>
-					</div>
-					<hr />
-					<p class="eyebrow" data-i18n="section.gameDeck">GAME DECK</p>
-					<label class="deck-picker" for="deck-select"><span data-i18n="deck.select">山札</span>
-						<select id="deck-select" aria-label="使用する山札"></select>
-					</label>
-					<label class="deck-picker" for="matching-pattern-mode-select"><span data-i18n="deck.matchingPattern">辺記号パターン</span>
-						<select id="matching-pattern-mode-select" aria-label="辺記号パターンの判定方法">
-							<option value="both" data-i18n="deck.both">通常・180度回転を判定</option>
-							<option value="normal-only" data-i18n="deck.normalOnly">通常のみを判定</option>
-						</select>
-					</label>
-					<label class="deck-picker" for="terrain-pattern-mode-select"><span data-i18n="deck.terrainPattern">地形パターン</span>
-						<select id="terrain-pattern-mode-select" aria-label="地形パターンの判定方法">
-							<option value="both" data-i18n="deck.both">通常・180度回転を判定</option>
-							<option value="normal-only" data-i18n="deck.normalOnly">通常のみを判定</option>
-						</select>
-					</label>
-					<label class="deck-picker" for="terrain-mirror-mode-select"><span data-i18n="deck.terrainMirror">地形の左右反転</span>
-						<select id="terrain-mirror-mode-select" aria-label="地形の左右反転ルール">
-							<option value="once" data-i18n="deck.once">各プレイヤー1回</option>
-							<option value="unlimited" selected data-i18n="deck.unlimited">何回でも判定・使用</option>
-						</select>
-					</label>
-					<button id="start-deck" class="primary" data-i18n="deck.start">この山札で新しいゲーム</button>
-					<p class="eyebrow" data-i18n="section.currentTile">CURRENT TILE</p>
-					<div class="current-tile-wrap">
-						<canvas id="current-tile" width="220" height="180" data-i18n-aria-label="tile.current" aria-label="現在のタイル"></canvas>
-						<button id="redo-tile" class="primary hidden" data-i18n="tile.redo">↩ やり直す</button>
-						<button id="redraw-tile" data-i18n="tile.redraw">↺ 引き直し</button>
-						<button id="mirror-tile" data-i18n="tile.mirrorOnce">⇋ 地形を反転（1回）</button>
-					</div>
-					<p id="tile-label" class="tile-label"></p>
-					<div id="meeple-options" class="meeple-options" aria-live="polite"></div>
-				</aside>
-
-				<section class="board-area">
-					<div class="board-heading">
-						<div>
-							<p class="eyebrow" data-i18n="section.board">BOARD</p>
-							<h2 data-i18n="board.title">ひし形の谷</h2>
-						</div>
-						<div class="legend">
-							<span><b class="confirmed"></b><span data-i18n="board.confirmed">確定配置</span></span>
-							<span><b class="regular"></b><span data-i18n="board.candidate">このタイルを配置可能</span></span>
-						</div>
-					</div>
-					<div id="board-frame" class="board-frame">
-						<canvas id="board" data-i18n-aria-label="board.canvas" aria-label="ゲーム盤面"></canvas>
-						<div id="placement-actions" class="placement-actions hidden">
-							<button id="rotate-tile" data-i18n-title="board.rotate" data-i18n-aria-label="board.rotate" title="180度回転" aria-label="180度回転">↻</button>
-							<button id="rotate-terrain" data-i18n-title="board.rotateTerrain" data-i18n-aria-label="board.rotateTerrain" title="地形を180度回転" aria-label="地形を180度回転">↻</button>
-							<button id="mirror-terrain" data-i18n-title="board.mirrorTerrain" data-i18n-aria-label="board.mirrorTerrain" title="地形を左右反転" aria-label="地形を左右反転">⇋</button>
-							<button id="confirm-placement" class="primary" data-i18n-title="board.confirm" data-i18n-aria-label="board.confirm" title="配置を確定" aria-label="配置を確定">✓</button>
-							<button id="skip-meeple" class="primary" data-i18n-title="board.skipMeeple" data-i18n-aria-label="board.skipMeeple" title="ミープルを置かない" aria-label="ミープルを置かない">→</button>
-						</div>
-						<div class="board-help">
-							<span data-i18n="board.help">ドラッグで移動　／　ホイール・ピンチで拡大縮小　／　候補をクリックして配置</span>
-						</div>
-					</div>
-					<div class="board-actions">
-						<button id="force-end" data-i18n="board.forceEnd" data-i18n-title="board.forceEndTitle" title="デバッグ用：ただちに終局得点を計算します">デバッグ：強制終了・採点</button>
-					</div>
-					<section class="play-log-panel" aria-labelledby="play-log-heading">
-						<h3 id="play-log-heading" data-i18n="log.title">プレイログ</h3>
-						<p id="replay-status" role="status" class="hidden"></p>
-						<button id="replay-game" class="hidden" type="button" data-i18n="log.replayButton">もう一度再生</button>
-						<ol id="play-log" class="play-log"></ol>
-					</section>
-				</section>
-
-				<aside class="right-panel panel">
-					<p class="eyebrow" data-i18n="section.settings">SETTINGS</p>
-					<h2 data-i18n="settings.title">プロトタイプ設定</h2>
-					<label><span data-i18n="settings.theme">タイルテーマ</span>
-						<select id="theme-select">
-							<option value="none" data-i18n="settings.noTheme">テーマなし（デバッグ）</option>
-							<option value="meadow" data-i18n="settings.meadow">草原</option>
-							<option value="cyber" data-i18n="settings.cyber">サイバー</option>
-						</select>
-					</label>
-					<label><span data-i18n="settings.side">タイル辺長</span> <output id="side-length" data-i18n="settings.sideValue">画面高の 1/5</output></label>
-					<label class="switch-row"
-						><input id="vertex-toggle" type="checkbox" checked /> <span data-i18n="settings.vertices">頂点色を表示</span></label
-					>
-					<label class="switch-row"
-						><input id="progressive-frontier-toggle" type="checkbox" /> <span data-i18n="settings.progressive">確定配置をぱらぱら表示</span></label
-					>
-					<hr />
-					<p class="eyebrow" data-i18n="section.deck">DECK</p>
-					<div class="deck-stat"><strong id="thin-count">10</strong><span>THIN</span></div>
-					<div class="deck-stat"><strong id="fat-count">11</strong><span>FAT</span></div>
-					<p class="small-note">
-						<span data-i18n="settings.note">試作セット。開始タイルはランダム、青赤頂点もランダムに決定されます。</span>
-					</p>
-					<hr />
-					<p class="eyebrow" data-i18n="section.scores">SCORES</p>
-					<div id="scoreboard" class="scoreboard" aria-live="polite"></div>
-					<div id="final-score-details" class="final-score-details hidden" aria-live="polite"></div>
-					<hr />
-					<p class="eyebrow" data-i18n="section.scope">SCOPE</p>
-					<p class="small-note">
-						<span data-i18n="settings.scope">草原は終局時、隣接する完成都市1つにつき3点です。四角の候補は草原（終局まで残留）、丸は完成時に回収できる領域です。</span>
-					</p>
-				</aside>
-			</section>
-		</main>
-		<script type="module" src="src/main.js"></script>
-	</body>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Penrosanne</title><link rel="stylesheet" href="game.css?v=20260925-log-toggle"></head>
+<body>
+<main class="game-table">
+ <div id="board-frame"><canvas id="board" data-i18n-aria-label="board.canvas" aria-label="ゲーム盤面"></canvas>
+  <div id="placement-actions" class="placement-actions hidden">
+   <button id="redo-tile" data-i18n-title="ui.undo" data-i18n-aria-label="ui.undo"><img class="ui-icon" src="assets/icons/close.svg" alt="" aria-hidden="true"></button>
+   <button id="rotate-tile" data-i18n-title="board.rotate" data-i18n-aria-label="board.rotate"><img class="ui-icon" src="assets/icons/rotate.svg" alt="" aria-hidden="true"></button>
+   <button id="rotate-terrain" data-i18n-title="board.rotateTerrain" data-i18n-aria-label="board.rotateTerrain"><img class="ui-icon" src="assets/icons/rotate.svg" alt="" aria-hidden="true"></button>
+   <button id="mirror-terrain" data-i18n-title="board.mirrorTerrain" data-i18n-aria-label="board.mirrorTerrain"><img class="ui-icon" src="assets/icons/mirror.svg" alt="" aria-hidden="true"></button>
+   <button id="confirm-placement" class="primary" data-i18n-title="board.confirm" data-i18n-aria-label="board.confirm"><img class="ui-icon" src="assets/icons/check.svg" alt="" aria-hidden="true"></button>
+   <button id="skip-meeple" data-i18n-title="board.skipMeeple" data-i18n-aria-label="board.skipMeeple"><img class="ui-icon" src="assets/icons/forward.svg" alt="" aria-hidden="true"></button>
+  </div>
+ </div>
+ <header class="table-header">
+  <a class="brand" href="index.html">PENROSANNE<img class="brand-mark" src="assets/icons/brand-mark.svg" alt="" aria-hidden="true"></a>
+  <div id="scoreboard" class="scoreboard" aria-live="polite"></div>
+  <nav class="table-tools">
+   <button id="replay-game" class="hidden" data-i18n-title="log.replayButton" data-i18n-aria-label="log.replayButton"><img class="ui-icon" src="assets/icons/replay.svg" alt="" aria-hidden="true"></button>
+   <button id="reset-view" data-i18n-title="nav.resetView" data-i18n-aria-label="nav.resetView"><img class="ui-icon" src="assets/icons/reset-view.svg" alt="" aria-hidden="true"></button>
+   <button id="open-settings" data-i18n-title="section.settings" data-i18n-aria-label="section.settings"><img class="ui-icon" src="assets/icons/settings.svg" alt="" aria-hidden="true"></button>
+   <button id="toggle-log" aria-controls="log-area" aria-expanded="false"><span class="log-toggle-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
+  </nav>
+ </header>
+ <footer class="turn-status"><div id="title-status" class="title-status hidden"></div><span id="active-player-label"></span><h1 id="turn-heading"></h1><div class="deck-count"><span><img class="deck-icon" src="assets/icons/thin.svg" alt="" aria-hidden="true"><strong id="thin-count">0</strong></span><span><img class="deck-icon" src="assets/icons/fat.svg" alt="" aria-hidden="true"><strong id="fat-count">0</strong></span></div></footer>
+ <section id="current-hand" class="current-hand hidden" aria-label="Current tile"><canvas id="current-tile" width="220" height="180" aria-hidden="true"></canvas><div class="hand-actions"><button id="redraw-tile" data-i18n="ui.redraw">引き直す</button></div></section>
+ <section id="hand-choice" class="hand-choice hidden" role="dialog" aria-labelledby="hand-choice-title"><div class="hand-choice-heading"><strong id="hand-choice-title" data-i18n="hand.choose"></strong><button id="close-hand-choice" data-i18n-aria-label="ui.close"><img class="ui-icon" src="assets/icons/close.svg" alt=""></button></div><div id="hand-choice-options"></div></section>
+ <section id="log-area" class="log-area hidden">
+  <h2 id="log-title" data-i18n="log.title"></h2>
+  <button id="log-section-toggle" class="log-section-toggle hidden" aria-controls="play-log-section" aria-expanded="false"></button>
+  <div id="play-log-section" class="log-section-content"><ol id="play-log"></ol></div>
+  <button id="score-section-toggle" class="log-section-toggle hidden" aria-controls="final-score-details" aria-expanded="false"></button>
+  <div id="final-score-details" class="hidden"></div>
+ </section>
+ <div hidden><div id="meeple-options"></div></div>
+ <dialog id="confirm-dialog" class="confirm-dialog"><div class="confirm-card"><h2 id="confirm-dialog-title"></h2><p id="confirm-dialog-message"></p><div class="confirm-actions"><button id="confirm-dialog-cancel" data-i18n="ui.cancel">キャンセル</button><button id="confirm-dialog-accept" class="primary" data-i18n="ui.continue">続行</button></div></div></dialog>
+ <section id="settings-screen" class="settings-screen" aria-labelledby="settings-title">
+  <div class="setup-header"><span class="brand">PENROSANNE<img class="brand-mark" src="assets/icons/brand-mark.svg" alt="" aria-hidden="true"></span><button id="close-settings" class="hidden" data-i18n-aria-label="ui.close"><img class="ui-icon" src="assets/icons/close.svg" alt="" aria-hidden="true"></button></div>
+  <div class="setup-content">
+   <h1 id="settings-title" data-i18n="ui.newGame">新しいゲーム</h1>
+   <div class="setup-grid">
+    <label><span data-i18n="setup.playerCount"></span><select id="player-count-select"><option value="2" data-i18n="setup.players2"></option><option value="3" data-i18n="setup.players3"></option><option value="4" data-i18n="setup.players4"></option></select></label>
+    <label class="player-color-setting" data-player-index="0"><span data-i18n="setup.player1Color"></span><span class="color-control"><img id="player1-color-swatch" alt="" width="44" height="44"><select id="player1-color" data-i18n-aria-label="setup.player1Color"></select></span></label>
+    <label class="player-color-setting" data-player-index="1"><span data-i18n="setup.player2Color"></span><span class="color-control"><img id="player2-color-swatch" alt="" width="44" height="44"><select id="player2-color" data-i18n-aria-label="setup.player2Color"></select></span></label>
+    <label class="player-color-setting" data-player-index="2"><span data-i18n="setup.player3Color"></span><span class="color-control"><img id="player3-color-swatch" alt="" width="44" height="44"><select id="player3-color" data-i18n-aria-label="setup.player3Color"></select></span></label>
+    <label class="player-color-setting" data-player-index="3"><span data-i18n="setup.player4Color"></span><span class="color-control"><img id="player4-color-swatch" alt="" width="44" height="44"><select id="player4-color" data-i18n-aria-label="setup.player4Color"></select></span></label>
+    <label><span data-i18n="deck.select"></span><select id="deck-select"></select></label>
+    <label><span data-i18n="setup.handMode"></span><select id="hand-mode-select"><option value="single" data-i18n="setup.singleHand"></option><option value="private-city-planning" data-i18n="setup.privatePlanning"></option></select></label>
+    <label><span data-i18n="deck.matchingPattern"></span><select id="matching-pattern-mode-select"><option value="both" data-i18n="deck.both"></option><option value="normal-only" data-i18n="deck.normalOnly"></option></select></label>
+    <label><span data-i18n="settings.fieldRule"></span><select id="field-rule-mode-select"><option value="enabled" data-i18n="settings.enabled"></option><option value="disabled" data-i18n="settings.disabled"></option></select></label>
+    <label><span data-i18n="settings.matchingRule"></span><select id="matching-rule-mode-select"><option value="standard" data-i18n="settings.standardRules"></option><option value="ignore" data-i18n="settings.ignoreMatchingRules"></option></select></label>
+    <div id="title-rule-settings" class="title-rule-settings"></div>
+    <label><span data-i18n="deck.terrainPattern"></span><select id="terrain-pattern-mode-select"><option value="both" data-i18n="deck.both"></option><option value="normal-only" data-i18n="deck.normalOnly"></option></select></label>
+    <label><span data-i18n="deck.terrainMirror"></span><select id="terrain-mirror-mode-select"><option value="unlimited" selected data-i18n="deck.unlimited"></option><option value="disabled" data-i18n="deck.mirrorDisabled"></option></select></label>
+    <label><span data-i18n="settings.theme"></span><select id="theme-select"><option value="meadow" selected data-i18n="settings.meadow"></option><option value="none" data-i18n="settings.noTheme"></option></select></label>
+    <label><span data-i18n="language.label"></span><select id="language-select"><option value="ja">日本語</option><option value="en">English</option></select></label>
+   </div>
+   <button id="start-deck" class="primary start-button" data-i18n="ui.start">ゲーム開始</button>
+   <details class="debug-tools"><summary data-i18n="ui.development">開発用</summary><label class="toggle-row"><span data-i18n="settings.progressive"></span><input id="progressive-frontier-toggle" type="checkbox" checked></label><a href="tile-gallery.html" data-i18n="nav.gallery"></a><button id="force-end" data-i18n="board.forceEnd"></button></details>
+  </div>
+ </section>
+</main>
+<canvas id="held-tile" aria-hidden="true"></canvas>
+<script type="module" src="src/main.js?v=20260925-log-toggle"></script>
+</body>
 </html>

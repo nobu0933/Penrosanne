@@ -5,6 +5,7 @@ export function beginHistoryTurn(state, tile) {
     number: state.turnHistory.length + 1,
     playerId: state.players[state.turn].id,
     tileId: tile.id,
+    tileShape: tile.shape,
     tileCount: state.board.tiles.length,
     meeplesBefore: { ...state.meeples },
     scoreStart: state.scoreEvents.length,

@@ -1,11 +1,12 @@
 import { edgeIndex, edgeVertexPairs, verticesFor } from '../game/Tile.js';
-import { loadMeepleImages, meepleKindForFeature, meepleLayerColors, playerColor } from './MeepleAssets.js';
+import { loadMeepleImages, meepleKindForFeature, playerColor, selectedMeepleColor } from './MeepleAssets.js';
+import { roundedTileShapePath } from './TileTheme.js';
 
 const palette = {
-	field: '#a9c579',
-	road: '#c69b67',
-	city: '#b55850',
-	monastery: '#d9b462',
+	field: '#568500',
+	road: '#E6C9B4',
+	city: '#A05F47',
+	monastery: '#E6C9B4',
 };
 // ミープル配置時の対象領域。通常色から少しだけ色相をずらし、輪郭を増やさずに
 // 対象の道・都市・修道院を見分けられるようにする。
@@ -28,10 +29,13 @@ export class BoardView {
 		this.ctx = canvas.getContext('2d');
 		this.options = options;
 		this.camera = { x: 0, y: 0, zoom: 1 };
+		this.outlineCache = new WeakMap();
+		this.renderFrame = null;
 		this.drag = null;
 		this.candidatesVisible = true;
 		this.selected = null;
 		this.previewTile = null;
+		this.previewDropOffsetY = 0;
 		this.featureMarkers = [];
 		this.meeples = [];
 		// タイル一覧など、ゲーム状態に属さない常設の表示用ミープル。
@@ -43,7 +47,6 @@ export class BoardView {
 		this.pinch = null;
 		this.tileTheme = options.tileTheme || null;
 		this.meepleImages = loadMeepleImages(() => this.render());
-		this.tintedMeeples = new Map();
 		this.resize();
 		this.bind();
 	}
@@ -67,6 +70,10 @@ export class BoardView {
 			this.render();
 		});
 		this.canvas.addEventListener('pointerdown', (event) => {
+			if (this.options.isTileHeld?.()) {
+				if (event.pointerType === 'touch') this.options.onCancelTileDrag?.();
+				return;
+			}
 			if (this.interactionLocked) return;
 			if (event.pointerType === 'touch') {
 				this.touchPoints.set(event.pointerId, this.screenPoint(event));
@@ -141,7 +148,7 @@ export class BoardView {
 			this.camera.y += dy;
 			this.drag.x = point.x;
 			this.drag.y = point.y;
-			this.render();
+			this.requestRender();
 		});
 		this.canvas.addEventListener('pointerleave', () => {
 			if (this.markerDrag) return;
@@ -159,6 +166,7 @@ export class BoardView {
 				this.markerDrag = null;
 				return;
 			}
+			if (this.options.isTileHeld?.()) return;
 			if (!this.drag?.moved) this.pick(event);
 			this.drag = null;
 		});
@@ -179,12 +187,13 @@ export class BoardView {
 		this.canvas.addEventListener(
 			'wheel',
 			(event) => {
+				if (this.options.isTileHeld?.()) { event.preventDefault(); return; }
 				if (this.interactionLocked) { event.preventDefault(); return; }
 				if (this.options.allowCameraControls === false) return;
 				event.preventDefault();
 				const scale = event.deltaY < 0 ? 1.1 : 0.9;
 				this.camera.zoom = Math.max(0.2, Math.min(2.8, this.camera.zoom * scale));
-				this.render();
+				this.requestRender();
 			},
 			{ passive: false },
 		);
@@ -208,7 +217,7 @@ export class BoardView {
 		const zoom = clamp(this.pinch.zoom * (distance / this.pinch.distance), .2, 2.8);
 		// 指の中点の下にあった盤面座標を保つため、倍率と同時にカメラ座標も補正する。
 		this.zoomAt(this.pinch.world, center, zoom);
-		this.render();
+		this.requestRender();
 	}
 	finishPinchPointer(event) {
 		if (event.pointerType !== 'touch') return false;
@@ -281,10 +290,7 @@ export class BoardView {
 			return;
 		}
 		if (!this.candidatesVisible) return;
-		const hit = this.options.candidates.find(
-			(tile) =>
-				Math.hypot(tile.centerX - world.x, tile.centerY - world.y) < this.options.side * 0.8,
-		);
+		const hit = this.options.candidates.find((tile) => this.pointIsInTile(tile, world));
 		if (hit) {
 			this.selected = hit._candidateKey || hit.id;
 			this.options.onSelect?.(hit);
@@ -296,17 +302,71 @@ export class BoardView {
 			(item) => Math.hypot(item.x - world.x, item.y - world.y) < this.options.side * 0.16,
 		);
 	}
+	requestRender() {
+		if (this.renderFrame !== null) return;
+		this.renderFrame = requestAnimationFrame(() => {
+			this.renderFrame = null;
+			this.render();
+		});
+	}
+	// 全頂点は中心から side 以内。側面・線幅・影が画面端で欠けない余白も含める。
+	tileIsVisible(tile) {
+		const zoom = this.camera.zoom;
+		const x = this.width / 2 + this.camera.x + tile.centerX * zoom;
+		const y = this.height / 2 + this.camera.y + tile.centerY * zoom;
+		const radius = this.options.side * zoom + 24;
+		return x + radius >= 0 && x - radius <= this.width && y + radius >= 0 && y - radius <= this.height;
+	}
+	outlineFor(tile) {
+		const side = this.options.side;
+		const key = `${tile.shape}:${side}:${tile.centerX}:${tile.centerY}:${tile.rotation || 0}`;
+		const cached = this.outlineCache.get(tile);
+		if (cached?.key === key) return cached.path;
+		const path = new Path2D();
+		const matrix = new DOMMatrix().translate(tile.centerX, tile.centerY).rotate((tile.rotation || 0) * 180 / Math.PI);
+		path.addPath(roundedTileShapePath(tile.shape, side), matrix);
+		this.outlineCache.set(tile, { key, path });
+		return path;
+	}
 	render() {
+		if (this.renderFrame !== null) {
+			cancelAnimationFrame(this.renderFrame);
+			this.renderFrame = null;
+		}
 		const ctx = this.ctx;
 		this.hoveredFeatures = this.hoveredFeatureMap();
 		ctx.clearRect(0, 0, this.width, this.height);
 		ctx.save();
 		ctx.translate(this.width / 2 + this.camera.x, this.height / 2 + this.camera.y);
 		ctx.scale(this.camera.zoom, this.camera.zoom);
-		this.options.placed.forEach((tile, index) => {
+		// 候補・確定枠は全タイル要素より先に、厚み分下げて描く。
+		ctx.save();
+		ctx.translate(0, 11 / this.camera.zoom);
+		if (this.candidatesVisible)
+			(this.options.structuralCandidates || []).forEach((tile) => { if (this.tileIsVisible(tile)) this.drawStructuralOutline(ctx, tile); });
+		if (this.candidatesVisible)
+			this.options.candidates.forEach((tile) => { if (this.tileIsVisible(tile)) this.drawTile(ctx, tile, true); });
+		const shadowTarget = this.dropTarget || (this.previewDropOffsetY > 0 ? this.previewTile : null);
+		if (shadowTarget) this.drawLandingShadow(ctx, shadowTarget);
+		ctx.restore();
+		const visibleTiles = this.options.placed.map((tile, index) => ({ tile, index })).filter(({ tile }) => this.tileIsVisible(tile));
+		visibleTiles.forEach(({ tile, index }) => {
 			ctx.save();
 			if (this.historyEntry && index >= this.historyEntry.tileCount) ctx.globalAlpha = .18;
-			this.drawTile(ctx, tile, false);
+			this.drawTileBody(ctx, tile);
+			ctx.restore();
+		});
+		// 仮置きタイルの側面も確定配置と同じ層で描く。
+		// 本体より先に全タイルの側面を描くことで、既存タイルの上面に
+		// 隠れるべき奥側の側面が前面へ出てしまうのを防ぐ。
+		const previewDrawingTile = this.previewTile && this.previewDropOffsetY
+			? { ...this.previewTile, centerY: this.previewTile.centerY - this.previewDropOffsetY }
+			: this.previewTile;
+		if (previewDrawingTile) this.drawTileBody(ctx, previewDrawingTile);
+		visibleTiles.forEach(({ tile, index }) => {
+			ctx.save();
+			if (this.historyEntry && index >= this.historyEntry.tileCount) ctx.globalAlpha = .18;
+			this.drawTile(ctx, tile, false, false, false);
 			if (tile.id === this.historyEntry?.tileId) {
 				const points = Object.values(verticesFor(tile, this.options.side));
 				ctx.beginPath();
@@ -321,14 +381,11 @@ export class BoardView {
 			}
 			ctx.restore();
 		});
-		if (this.candidatesVisible)
-			(this.options.structuralCandidates || []).forEach((tile) => this.drawStructuralOutline(ctx, tile));
-		if (this.candidatesVisible)
-			this.options.candidates.forEach((tile) => this.drawTile(ctx, tile, true));
-		if (this.previewTile) this.drawTile(ctx, this.previewTile, true, true);
+		if (previewDrawingTile) this.drawTile(ctx, previewDrawingTile, true, true, false);
 		this.drawFeatureMarkers(ctx);
 		this.drawMeeples(ctx);
 		ctx.restore();
+		this.options.onRender?.();
 	}
 	hoveredFeatureMap() {
 		const result = new Map(), component = this.hoverMarker?.component;
@@ -339,48 +396,73 @@ export class BoardView {
 	highlightFor(tile, type, index) {
 		return this.hoveredFeatures?.get(`${tile.id}:${type}:${index}`) || null;
 	}
-	drawTile(ctx, tile, candidate, preview = false) {
+	drawLandingShadow(ctx, tile, opacity = .7) {
+		ctx.save();
+		ctx.translate(tile.centerX, tile.centerY);
+		ctx.rotate(tile.rotation || 0);
+		ctx.fillStyle = '#00513E';
+		ctx.globalAlpha *= opacity;
+		ctx.fill(roundedTileShapePath(tile.shape, this.options.side, .8, .18));
+		ctx.restore();
+	}
+	drawTileBody(ctx, tile) {
+		const outline = this.outlineFor(tile);
+		ctx.save();
+		const thickness = 11 / this.camera.zoom;
+		ctx.translate(0, thickness + 1 / this.camera.zoom);
+		ctx.fillStyle = '#333333';
+		ctx.globalAlpha *= .25;
+		ctx.fill(outline);
+		ctx.restore();
+		ctx.save();
+		ctx.fillStyle = '#00513E';
+		for (let offset = 1; offset <= 11; offset++) {
+			ctx.save();
+			ctx.translate(0, offset / this.camera.zoom);
+			ctx.fill(outline);
+			ctx.restore();
+		}
+		ctx.restore();
+	}
+	drawTileAtScreen(ctx, tile, x, y, side, lift = 0) {
+		const painter = Object.create(this);
+		painter.options = { ...this.options, side };
+		painter.camera = { zoom: 1 };
+		painter.hoveredFeatures = null;
+		painter.previewOutlineColor = null;
+		if (lift > 0) {
+			painter.drawLandingShadow(ctx, { ...tile, centerX: x, centerY: y + 4 }, .3);
+		}
+		painter.drawTile(ctx, { ...tile, centerX: x, centerY: y - lift }, false);
+	}
+	drawTile(ctx, tile, candidate, preview = false, body = true) {
+		const outline = this.outlineFor(tile);
 		const points = verticesFor(tile, this.options.side),
 			ids = Object.keys(points),
-			candidateColor = '#0c736d';
+			candidateColor = '#E6C9B4';
 		ctx.save();
-		ctx.beginPath();
-		ids.forEach((id, index) => {
-			const p = points[id];
-			index ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y);
-		});
-		ctx.closePath();
-		ctx.fillStyle = candidate
-			? (tile._candidateKey || tile.id) === this.selected ? 'rgba(12,115,109,.26)' : 'rgba(12,115,109,.11)'
+		if ((!candidate || preview) && body) this.drawTileBody(ctx, tile);
+		ctx.fillStyle = candidate && !preview
+			? (tile._candidateKey || tile.id) === this.selected ? 'rgba(230,201,180,.26)' : 'rgba(230,201,180,.10)'
 			: palette.field;
-		ctx.fill();
-		ctx.lineWidth = candidate ? 2 : 3;
-		ctx.strokeStyle = candidate ? candidateColor : '#425e50';
-		ctx.setLineDash(candidate ? [7, 5] : []);
-		ctx.stroke();
+		ctx.fill(outline);
+		ctx.lineWidth = 1 / this.camera.zoom;
+		ctx.strokeStyle = candidateColor;
+		ctx.setLineDash(candidate && !preview ? [5 / this.camera.zoom, 4 / this.camera.zoom] : []);
+		if (candidate && !preview) ctx.stroke(outline);
 		ctx.setLineDash([]);
 		if (!candidate || preview) {
+			ctx.save();
+			ctx.clip(outline);
 			this.drawFeatures(ctx, tile, points);
-			if (this.options.showVertices())
-				this.drawVertices(ctx, points);
+			ctx.restore();
 			// 仮置きだけは、候補の通常色とは別に手番プレイヤーの色で外周を示す。
 			if (preview && this.previewOutlineColor) {
-				ctx.beginPath();
-				ids.forEach((id, index) => {
-					const point = points[id];
-					index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y);
-				});
-				ctx.closePath();
 				ctx.strokeStyle = this.previewOutlineColor;
-				ctx.lineWidth = 5;
+				ctx.lineWidth = 3 / this.camera.zoom;
 				ctx.lineJoin = 'round';
-				ctx.stroke();
+				ctx.stroke(outline);
 			}
-		} else {
-			ctx.fillStyle = candidateColor;
-			ctx.font = '11px DM Mono';
-			ctx.textAlign = 'center';
-			ctx.fillText(tile.shape.toUpperCase(), tile.centerX, tile.centerY + 4);
 		}
 		ctx.restore();
 	}
@@ -394,7 +476,7 @@ export class BoardView {
 		});
 		ctx.closePath();
 		ctx.strokeStyle = '#b8bcb7';
-		ctx.lineWidth = 1.8;
+		ctx.lineWidth = .8 / this.camera.zoom;
 		ctx.setLineDash([]);
 		ctx.stroke();
 		ctx.restore();
@@ -609,17 +691,6 @@ export class BoardView {
 			ctx.restore();
 		}
 	}
-	drawVertices(ctx, points) {
-		Object.values(points).forEach((p) => {
-			ctx.beginPath();
-			ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
-			ctx.fillStyle = '#fffdf7';
-			ctx.fill();
-			ctx.strokeStyle = '#34453e';
-			ctx.lineWidth = 1.5;
-			ctx.stroke();
-		});
-	}
 	drawFeatureMarkers(ctx) {
 		for (const marker of this.featureMarkers) {
 			if (marker.hideIcon) continue;
@@ -635,47 +706,16 @@ export class BoardView {
 				size,
 				size,
 				this.featureMarkerColor || '#0c736d',
+				this.featureMarkerPlayerIndex ?? 0,
 			);
 			ctx.restore();
 		}
 	}
-	drawMeepleIcon(ctx, kind, x, y, width, height, color) {
-		const layers = this.meepleImages[kind];
-		if (!layers?.front?.naturalWidth) return false;
-		const colors = meepleLayerColors(color);
-		if (this.options.preserveMeepleColor) {
-			ctx.save();
-			for (const layer of ['dark', 'light', 'front']) {
-				const image = layers[layer];
-				if (image?.naturalWidth) ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
-			}
-			ctx.restore();
-			return true;
-		}
-		ctx.save();
-		for (const layer of ['dark', 'light', 'front']) {
-			const tinted = this.tintedMeeple(kind, layer, colors[layer]);
-			if (tinted) ctx.drawImage(tinted, x - width / 2, y - height / 2, width, height);
-		}
-		ctx.restore();
+	drawMeepleIcon(ctx, kind, x, y, width, height, color, playerIndex = 0) {
+		const image = this.meepleImages[kind]?.[selectedMeepleColor(playerIndex)];
+		if (!image?.naturalWidth) return false;
+		ctx.drawImage(image, x - width / 2, y - height / 2, width, height);
 		return true;
-	}
-	tintedMeeple(kind, layer, color) {
-		const image = this.meepleImages[kind]?.[layer], key = `${kind}:${layer}:${color}`;
-		if (!image?.naturalWidth) return null;
-		if (this.tintedMeeples.has(key)) return this.tintedMeeples.get(key);
-		const canvas = document.createElement('canvas');
-		canvas.width = image.naturalWidth;
-		canvas.height = image.naturalHeight;
-		const tint = canvas.getContext('2d');
-		// 通常CanvasはSVGの透明マスクを維持する。OffscreenCanvasはキャッシュ済みSVGで
-		// 空のビットマップを返す環境があるため、ここでは使わない。
-		tint.drawImage(image, 0, 0, canvas.width, canvas.height);
-		tint.globalCompositeOperation = 'source-in';
-		tint.fillStyle = color;
-		tint.fillRect(0, 0, canvas.width, canvas.height);
-		this.tintedMeeples.set(key, canvas);
-		return canvas;
 	}
 	drawMeeples(ctx) {
 		for (const meeple of [...this.meeples, ...this.staticMeeples]) {
@@ -688,10 +728,10 @@ export class BoardView {
 			const baseSize = (kind === 'lying' ? 28 : 26) * (this.options.meepleScale ?? 1);
 			const scale = (highlighted ? 1.18 : 1) * (meeple.displayScale || 1), size = baseSize * scale;
 			if (highlighted || meeple.galleryMarker) {
-				ctx.shadowColor = '#0c736d';
-				ctx.shadowBlur = meeple.galleryMarker ? 3 : 8;
+				ctx.shadowColor = playerColor(meeple.playerIndex);
+				ctx.shadowBlur = 0;
 			}
-			this.drawMeepleIcon(ctx, kind, meeple.x, meeple.y, size, size, playerColor(meeple.playerIndex));
+			this.drawMeepleIcon(ctx, kind, meeple.x, meeple.y, size, size, playerColor(meeple.playerIndex), meeple.playerIndex);
 			ctx.restore();
 		}
 	}

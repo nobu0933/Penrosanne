@@ -70,3 +70,61 @@ export function scoreField(board, tile, index) {
   }
   return cities.size * 3;
 }
+
+export const TITLE_POINTS = 10;
+
+// 称号を増やすときはここへ定義を追加する。UIの開始前設定もこの一覧から作る。
+export const TITLE_DEFINITIONS = Object.freeze([
+  { id: 'vertexKing', metric: (state, player) => player.vertexCompletions },
+  { id: 'roadKing', metric: (state, player) => Math.max(0, ...state.scoreEvents
+    .filter((event) => event.type === 'road' && event.playerId === player.id)
+    .map((event) => event.points)) },
+  { id: 'supportKing', metric: (state, player) => player.supportCount },
+]);
+
+export function titleAwards(state, enabledTitles = {}) {
+  const awards = [];
+  for (const { id, metric } of TITLE_DEFINITIONS) {
+    if (!enabledTitles[id]) continue;
+    const values = state.players.map((player) => ({ playerId: player.id, count: metric(state, player) }));
+    const highest = Math.max(0, ...values.map((value) => value.count));
+    if (highest === 0) continue;
+    for (const value of values) if (value.count === highest)
+      awards.push({ playerId: value.playerId, titleId: id, points: TITLE_POINTS, count: highest });
+  }
+  return awards;
+}
+
+// 対局中の表示専用。終局の称号採点は titleAwards の既存基準を維持する。
+export function provisionalTitleLeaders(state, enabledTitles = {}) {
+  const longestLiveRoad = new Map(state.players.map((player) => [player.id, 0]));
+  if (enabledTitles.roadKing && state.board) {
+    const visited = new Set();
+    for (const tile of state.board.tiles) for (let index = 0; index < (tile.featureGroups.road?.length ?? 0); index++) {
+      const ref = state.board.featureRef(tile, 'road', index);
+      if (visited.has(ref)) continue;
+      const component = state.board.component(tile, 'road', index);
+      const counts = new Map();
+      const tileIds = new Set();
+      for (const feature of component.features) {
+        const featureRef = state.board.featureRef(feature.tile, 'road', feature.index);
+        visited.add(featureRef);
+        tileIds.add(feature.tile.id);
+        const owner = state.meeples[featureRef];
+        if (owner) counts.set(owner, (counts.get(owner) ?? 0) + 1);
+      }
+      const highest = Math.max(0, ...counts.values());
+      if (!highest) continue;
+      for (const [playerId, count] of counts) if (count === highest)
+        longestLiveRoad.set(playerId, Math.max(longestLiveRoad.get(playerId) ?? 0, tileIds.size));
+    }
+  }
+  return TITLE_DEFINITIONS.filter(({ id }) => enabledTitles[id]).map(({ id, metric }) => {
+    const values = state.players.map((player) => ({
+      playerId: player.id,
+      count: Math.max(metric(state, player), id === 'roadKing' ? (longestLiveRoad.get(player.id) ?? 0) : 0),
+    }));
+    const highest = Math.max(0, ...values.map(({ count }) => count));
+    return { id, count: highest, playerIds: highest ? values.filter(({ count }) => count === highest).map(({ playerId }) => playerId) : [] };
+  });
+}

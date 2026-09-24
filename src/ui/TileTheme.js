@@ -1,7 +1,68 @@
-import { edgeIndex } from '../game/Tile.js';
+import { edgeIndex, localVertices } from '../game/Tile.js';
 import { THEME_IMAGE_FORMATS } from './ThemeCatalog.js';
 
 const MIRROR_SUFFIX = '-mirror';
+const roundedPaths = new Map();
+
+// Canvas のパスは描画先の状態を持たないので、テーマの各レイヤーでも共用できる。
+export function roundedTileShapePath(shape, side, scale = 0.985, cornerRatio = 0.075) {
+	const key = `${shape}:${side}:${scale}:${cornerRatio}`;
+	if (roundedPaths.has(key)) return roundedPaths.get(key);
+	const path = new Path2D();
+	roundedTilePath({
+		beginPath() {},
+		moveTo: (...args) => path.moveTo(...args),
+		lineTo: (...args) => path.lineTo(...args),
+		quadraticCurveTo: (...args) => path.quadraticCurveTo(...args),
+		closePath: () => path.closePath(),
+	}, shape, side, scale, cornerRatio);
+	// 一覧・手札のリサイズで異なる寸法が増えても保持量を制限する。
+	if (roundedPaths.size >= 32) roundedPaths.delete(roundedPaths.keys().next().value);
+	roundedPaths.set(key, path);
+	return path;
+}
+
+export function roundedTilePath(ctx, shape, side, scale = 0.985, cornerRatio = 0.075) {
+	// 見た目だけ縮める。合法配置・接続・アンカーの座標は変更しない。
+	const points = Object.values(localVertices(shape, side * scale));
+	const radius = side * scale * cornerRatio;
+	const corners = points.map((point, index) => {
+		const previous = points[(index + points.length - 1) % points.length];
+		const next = points[(index + 1) % points.length];
+		const previousLength = Math.hypot(previous.x - point.x, previous.y - point.y);
+		const nextLength = Math.hypot(next.x - point.x, next.y - point.y);
+		const cut = Math.min(radius, previousLength * 0.2, nextLength * 0.2);
+		const previousRatio = cut / previousLength;
+		const nextRatio = cut / nextLength;
+		return {
+			corner: point,
+			start: {
+				x: point.x + (previous.x - point.x) * previousRatio,
+				y: point.y + (previous.y - point.y) * previousRatio,
+			},
+			end: {
+				x: point.x + (next.x - point.x) * nextRatio,
+				y: point.y + (next.y - point.y) * nextRatio,
+			},
+		};
+	});
+	ctx.beginPath();
+	ctx.moveTo(corners[0].start.x, corners[0].start.y);
+	for (let index = 0; index < corners.length; index++) {
+		const current = corners[index], next = corners[(index + 1) % corners.length];
+		ctx.quadraticCurveTo(current.corner.x, current.corner.y, current.end.x, current.end.y);
+		ctx.lineTo(next.start.x, next.start.y);
+	}
+	ctx.closePath();
+}
+
+export function tileOutlinePath(ctx, tile, side) {
+	ctx.save();
+	ctx.translate(tile.centerX, tile.centerY);
+	ctx.rotate(tile.rotation || 0);
+	roundedTilePath(ctx, tile.shape, side);
+	ctx.restore();
+}
 
 export function tileAssetFilename(tile, layer, index = null) {
 	const kind = tile.idPrefix.replace(new RegExp(`${MIRROR_SUFFIX}$`), '');
@@ -61,6 +122,8 @@ export class TileTheme {
 		ctx.rotate(tile.rotation || 0);
 		if (tile.mirrored) ctx.scale(-1, 1);
 		if (tile.terrainPattern === 'halfTurn') ctx.rotate(Math.PI);
+		// テーマ画像のはみ出しを各タイルの輪郭で隠し、角はわずかに丸める。
+		ctx.clip(roundedTileShapePath(tile.shape, side));
 		ctx.drawImage(tint ? this.tintedImage(image, tint) : image.element, -side, -side, side * 2, side * 2);
 		ctx.restore();
 		return true;

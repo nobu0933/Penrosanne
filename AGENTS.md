@@ -10,6 +10,7 @@ Penrosanne は、ベンローズタイルの非周期的な形状を盤面に用
 - `src/game/` は UI・通信・DOM API に依存させない。ゲーム状態を受け取り、結果を返す純粋なロジックを優先する。
 - ルール判定は `src/game/Rules.js`、得点計算は `src/game/Scoring.js` に集約する。
 - UI はゲーム状態を直接変更せず、`GameEngine` の公開操作を呼び出す。
+- UI の見た目・操作演出は `docs/ui-design.md` を正とし、既存の試作段階の指示や実装と食い違う場合は UI デザイン仕様書を優先する。ゲームルール・得点は各ゲーム仕様を正とする。
 - オンライン対戦ではホストを正しい状態の唯一の管理者（authoritative host）とし、クライアントから受け取る操作を必ず検証する。
 - 新しいメッセージ種別は `src/network/Protocol.js` と `docs/network-protocol.md` を同時に更新する。
 

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<title>盤面描画の比較</title>
+<button id="run">描画比較を実行</button>
+<pre id="result">500枚の合成盤面で、従来の側面パス再生成・画面外描画と比較します。ゲームの合法盤面ではありません。</pre>
+<canvas style="width:800px;height:600px"></canvas>
+<script type="module">
+import { BoardView } from '../src/ui/BoardView.js';
+import { createPrototypeDeck } from '../src/game/TileSet.js';
+import { tileOutlinePath } from '../src/ui/TileTheme.js';
+const deck = createPrototypeDeck(() => .5);
+const placed = Array.from({ length:500 }, (_, i) => ({
+ ...deck[i % deck.length], id:`bench-${i}`,
+ centerX:(i % 25 - 12) * 120, centerY:(Math.floor(i / 25) - 10) * 120,
+ rotation:(i % 10) * Math.PI / 5,
+}));
+const view = new BoardView(document.querySelector('canvas'), { side:60, placed, candidates:[] });
+const optimizedBody = view.drawTileBody, optimizedVisibility = view.tileIsVisible;
+function previousBody(ctx, tile) {
+ ctx.save(); ctx.translate(0, 12 / this.camera.zoom);
+ tileOutlinePath(ctx, tile, this.options.side);
+ ctx.fillStyle='#333333'; ctx.globalAlpha *= .25; ctx.fill(); ctx.restore();
+ ctx.save(); ctx.fillStyle='#00513E';
+ for(let offset=1;offset<=11;offset++) {
+  ctx.save();ctx.translate(0,offset/this.camera.zoom);
+  tileOutlinePath(ctx,tile,this.options.side);ctx.fill();ctx.restore();
+ }
+ ctx.restore();
+}
+document.querySelector('#run').onclick = async () => {
+ const result=[];
+ for(const zoom of [.2,1,2.8]) {
+  view.camera.zoom=zoom;
+  const measure = (old) => {
+   view.drawTileBody=old?previousBody:optimizedBody;
+   view.tileIsVisible=old?()=>true:optimizedVisibility;
+   for(let i=0;i<3;i++) view.render();
+   const start=performance.now();
+   for(let i=0;i<20;i++) {view.camera.x=i;view.render();}
+   return (performance.now()-start)/20;
+  };
+  const before=measure(true), after=measure(false);
+  const updated=view.ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
+  view.drawTileBody=previousBody;view.tileIsVisible=()=>true;view.render();
+  const previous=view.ctx.getImageData(0,0,view.canvas.width,view.canvas.height).data;
+  let delta=0;for(let i=0;i<previous.length;i++)delta+=Math.abs(previous[i]-updated[i]);
+  result.push({zoom,beforeMs:+before.toFixed(2),afterMs:+after.toFixed(2),meanChannelDifference:delta/previous.length});
+  await new Promise(requestAnimationFrame);
+ }
+ view.drawTileBody=optimizedBody;view.tileIsVisible=optimizedVisibility;view.render();
+ document.querySelector('#result').textContent=JSON.stringify(result,null,2);
+};
+view.render();
+</script>
+</html>

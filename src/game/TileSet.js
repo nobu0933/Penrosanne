@@ -3754,7 +3754,7 @@ export function mirrorTile(tile) {
 	return mirrored;
 }
 
-// ミラー版はデッキへ加えない。反転アクションと空白防止の候補だけが利用する。
+// ミラー版はデッキへ加えない。仮置き候補と空白防止の判定だけが利用する。
 export function createPrototypeMirrorTiles(random = Math.random, deckType = 'standard') {
 	return createPrototypeDeck(random, deckType).map((tile) => mirrorTile(tile));
 }

@@ -9,7 +9,7 @@ import { createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../
 import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, manualAnchorOrder, manualFeatureAnchorsFor, MANUAL_FEATURE_ANCHORS, mirrorTile } from "../src/game/TileSet.js";
 import { TileTheme, tileAssetFilename } from "../src/ui/TileTheme.js";
 import { manualAnchorForFeature, markerForFeature } from "../src/ui/FeatureAnchors.js";
-import { MEEPLE_ASSETS, meepleLayerColors } from "../src/ui/MeepleAssets.js";
+import { MEEPLE_ASSETS, MEEPLE_ASSET_COUNT } from "../src/ui/MeepleAssets.js";
 
 const fixedRandom = () => .42;
 
@@ -80,12 +80,15 @@ test("順次表示用の確定配置探索は同期探索と同じ順序・結�
 	const options = { tileOptions: game.tileOptions, allowVerticalMatchingPattern: game.rules.allowVerticalMatchingPattern };
 	const synchronous = structuralPlacementFrontier(game.state.board, options);
 	const announced = [];
+	const checkpoints = [];
 	const progressive = await structuralPlacementFrontierProgressively(game.state.board, options, {
 		onForced: (tile) => announced.push(structuralPositionKey(tile)),
-		yieldControl: () => Promise.resolve(),
+		yieldControl: progress => { checkpoints.push(progress.forcedCount); return Promise.resolve(); },
 	});
 	assert.deepEqual(progressive.forced.map(structuralPositionKey), synchronous.forced.map(structuralPositionKey));
 	assert.deepEqual(announced, progressive.forced.map(structuralPositionKey));
+	assert.ok(checkpoints.length > announced.length, '追加がない頂点の検査でも中断機会を設ける');
+	assert.equal(checkpoints.at(-1), announced.length);
 });
 
 test("登録済みの Lite と Standard は、現在の定義どおりに山札を生成する", () => {
@@ -531,6 +534,12 @@ test("無制限の地形反転候補は通常・反転と180度回転を独立�
 			allowTerrainHalfTurn: true,
 			allowTerrainMirror: true,
 		});
+		const withoutMirroring = placementCandidates(board, hand, {
+			allowVerticalMatchingPattern: false,
+			allowTerrainHalfTurn: true,
+			allowTerrainMirror: false,
+		});
+		assert.ok(withoutMirroring.every((candidate) => !candidate.mirrored), '使用不能モードは反転候補を返さない');
 		mirroredCandidate ||= candidates.find((candidate) => candidate.mirrored);
 	}
 	assert.ok(mirroredCandidate, "左右反転した地形の候補も生成する");
@@ -560,15 +569,6 @@ test("地形の180度回転は辺・特徴・道路終点・草原小領域・�
 	assert.deepEqual(rotated.fieldScoreGroups, [[3, 4]]);
 	assert.deepEqual(rotated.fieldScoreCityAdjacency, { 0: [0] });
 	assert.equal(rotated.terrainPattern, "halfTurn");
-});
-
-test("左右反転した手札は辺記号の通常・180度回転を再評価する", () => {
-	const game = new GameEngine({ random: fixedRandom });
-	game.state.currentTile.matchingPattern = "normal";
-	game.state.currentTile.matchingPatternOptions = ["normal"];
-	game.mirrorCurrentTile();
-	assert.equal(game.state.currentTile.matchingPattern, null);
-	assert.deepEqual(game.state.currentTile.matchingPatternOptions, ["normal", "verticalInverse"]);
 });
 
 test("頂点型は指定された循環順列の連続部分だけを許可する", () => {
@@ -987,11 +987,29 @@ test("草原の占有は4小領域で接続した範囲に対して判定する"
 
 test("各プレイヤーは引いた未配置タイルを1回だけ引き直せる", () => {
   const game = new GameEngine({ random: fixedRandom });
-  const totalBefore = game.state.deck.length + game.state.board.tiles.length;
+  const deckBefore = game.state.deck.length;
+  const boardBefore = game.state.board.tiles.length;
+  const discardedBefore = game.state.discarded.length;
+  const oldTileId = game.state.currentTile.id;
   game.redrawCurrentTile();
   assert.equal(game.activePlayer.redrawUsed, true);
-  assert.equal(game.state.deck.length + game.state.board.tiles.length, totalBefore);
+  assert.equal(game.state.deck.length, deckBefore - 1);
+  assert.equal(game.state.board.tiles.length, boardBefore);
+  assert.equal(game.state.discarded.length, discardedBefore + 1);
+  assert.equal(game.state.discarded.at(-1).id, oldTileId);
+  assert.notEqual(game.state.currentTile.id, oldTileId);
   assert.throws(() => game.redrawCurrentTile(), /1回まで/);
+});
+
+test("山札が空なら手元のタイルを引き直せない", () => {
+  const game = new GameEngine({ random: fixedRandom, deferCandidateSearch: true });
+  const tileId = game.state.currentTile.id;
+  const discardedBefore = game.state.discarded.length;
+  game.state.deck = [];
+  assert.throws(() => game.redrawCurrentTile(), /山札が空/);
+  assert.equal(game.state.currentTile.id, tileId);
+  assert.equal(game.state.discarded.length, discardedBefore);
+  assert.equal(game.activePlayer.redrawUsed, false);
 });
 
 test("ミラー版は辺・アンカー・草原小領域を左右反転し、山札には入らない", () => {
@@ -1090,38 +1108,12 @@ test("テーマなしは画像レイヤーを描画しない", () => {
   assert.equal(theme.draw({}, {}, "field", 0, 120), false);
 });
 
-test("盤面ミープルは前面・明るい影・暗い影の正方形レイヤーを個別に持つ", () => {
-	for (const kind of ["standing", "lying"]) {
-		assert.deepEqual(Object.keys(MEEPLE_ASSETS[kind]).sort(), ["dark", "front", "light"]);
-		Object.values(MEEPLE_ASSETS[kind]).forEach((asset) => assert.match(asset, /meeple-(standing|lying)-(front|light-shadow|dark-shadow)\.svg$/));
+test("盤面・手元ミープルは12色の完成済みSVGを個別に使う", () => {
+	for (const kind of ["standing", "lying", "reserve"]) {
+		for (let color = 1; color <= MEEPLE_ASSET_COUNT; color++) {
+			assert.match(MEEPLE_ASSETS[kind](color), new RegExp(`meeple-${kind}_${color}\\.svg$`));
+		}
 	}
-	const colors = meepleLayerColors("#cf4a49");
-	assert.match(colors.front, /^#[0-9a-f]{6}$/i);
-	assert.notEqual(colors.front, colors.light);
-	assert.notEqual(colors.front, colors.dark);
-});
-
-test("反転は未配置タイルに1回だけ使え、引き直し後は元の向きに戻る", () => {
-  const game = new GameEngine({ random: fixedRandom, rules: { allowTerrainMirror: false } });
-  game.mirrorCurrentTile();
-  assert.equal(game.activePlayer.mirrorUsed, true);
-  assert.equal(game.state.currentTile.mirrored, true);
-	assert.ok(game.candidates().length > 0, "反転後も通常の配置候補を再計算できる");
-  assert.throws(() => game.mirrorCurrentTile(), /1回まで/);
-  game.redrawCurrentTile();
-  assert.equal(Boolean(game.state.currentTile.mirrored), false);
-  assert.ok(game.state.deck.every((tile) => !tile.mirrored));
-});
-
-test("地形反転を無制限にするモードでは同じ手札を何度でも左右反転できる", () => {
-	const game = new GameEngine({ random: fixedRandom, rules: { allowTerrainMirror: true } });
-	const originalId = game.state.currentTile.id;
-	game.mirrorCurrentTile();
-	assert.equal(game.activePlayer.mirrorUsed, false);
-	assert.equal(game.state.currentTile.mirrored, true);
-	game.mirrorCurrentTile();
-	assert.equal(Boolean(game.state.currentTile.mirrored), false);
-	assert.equal(game.state.currentTile.id, originalId);
 });
 
 test("完成都市は紋章を含めて2倍得点", () => {
@@ -1196,6 +1188,31 @@ test("草原は終局時に完成都市ごとに3点を得て、ミープルは�
   assert.equal(game.state.players[0].score, 3);
   assert.equal(game.state.meeples[ref], "p1");
 	assert.deepEqual(game.state.scoreEvents.map((event) => ({ type:event.type, points:event.points, reason:event.reason })), [{type:"field",points:3,reason:"end"}]);
+});
+
+test("終局時は都市・道・修道院のミープルも盤上に残り、手元数へ戻さない", () => {
+	const game = new GameEngine({ random:fixedRandom });
+	const tile = createTile({
+		shape:"thin",
+		edgeTerrain:{AB:"C",BC:"R",CD:"F",DA:"F"},
+		featureGroups:{city:[["AB"]],road:[["BC"]],field:[[]]},
+		hasMonastery:true,
+		roadTerminals:{0:[{kind:"edge",edge:"BC"},{kind:"edge",edge:"BC"}]},
+	}, "unfinished-with-meeples");
+	game.state.board = new Board(120);
+	game.state.board.add(tile);
+	const refs = [
+		game.state.board.featureRef(tile, "city", 0),
+		game.state.board.featureRef(tile, "road", 0),
+		"unfinished-with-meeples:monastery:0",
+	];
+	refs.forEach((ref) => { game.state.meeples[ref] = "p1"; });
+	game.state.players[0].meeples -= refs.length;
+
+	game.finishGame();
+
+	assert.equal(game.state.players[0].meeples, 7 - refs.length);
+	assert.ok(refs.every((ref) => game.state.meeples[ref] === "p1"));
 });
 
 test("残り山札を処理するとゲームを終了できる", () => {
