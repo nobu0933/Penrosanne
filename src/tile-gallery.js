@@ -340,9 +340,10 @@ async function copyText(text, message, button) {
 
 function serializeDeckDefinitions(deckId) {
 	const definitionName = {
-		lite: 'LITE_DEFINITIONS',
-		standard: 'STANDARD_DEFINITIONS',
-		'road-only': 'ROAD_ONLY_DEFINITIONS',
+	lite: 'LITE_DEFINITIONS',
+	standard: 'STANDARD_DEFINITIONS',
+	expansion: 'EXPANSION_DEFINITIONS',
+	'road-only': 'ROAD_ONLY_DEFINITIONS',
 	}[deckId];
 	const counts = deckDrafts.get(deckId);
 	const lines = catalog.flatMap((tile) => {

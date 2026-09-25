@@ -10,7 +10,7 @@ import { handTileId, candidatesForHandTile } from './HandCandidates.js';
 import { beginHistoryTurn, captureHistoryMeeples, completeHistoryTurn } from "./TurnHistory.js";
 
 export class GameEngine {
-  constructor({ playerCount=2, meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single' }={}) {
+  constructor({ playerCount=2, playerNames=[], meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single' }={}) {
     this.random=random;
     this.deckType=deckType;
     this.rules={allowVerticalMatchingPattern:rules.allowVerticalMatchingPattern ?? true,allowTerrainHalfTurn:rules.allowTerrainHalfTurn ?? true,allowTerrainMirror:rules.allowTerrainMirror ?? false,ignoreMatchingRules:rules.ignoreMatchingRules ?? false};
@@ -18,7 +18,10 @@ export class GameEngine {
     this.deferCandidateSearch=deferCandidateSearch;
     this._handCandidateCache=new Map();
     this._candidateGroups=null; this._structuralFrontier=null; this._previousStructuralFrontier=null; this._structuralChangedTile=null; this._changedTileAlreadyVirtual=false;
-    const players=Array.from({length:playerCount},(_,index)=>createPlayer({id:`p${index+1}`,name:`Player ${index+1}`,meeples}));
+    const players=Array.from({length:playerCount},(_,index)=>{
+      const requestedName=String(playerNames[index] ?? '').trim();
+      return createPlayer({id:`p${index+1}`,name:requestedName ? requestedName.slice(0, 10) : `Player ${index+1}`,meeples});
+    });
     const deck=shuffle(createPrototypeDeck(random, deckType),random);
     this.tileOptions=[...deck.map((tile)=>structuredClone(tile)), ...deck.map((tile)=>mirrorTile(tile))];
     this.state=createGameState({players,deck,handMode:handMode==='private-city-planning'?handMode:'single'});

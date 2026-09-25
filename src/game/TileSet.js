@@ -3491,6 +3491,10 @@ const STANDARD_DEFINITIONS = [
 	['city-one-side-curve-road-v', 2, 'fat'],
 	['city-one-side-curve-road-c-reverse', 1, 'thin'],
 	['city-one-side-curve-road-c-reverse', 2, 'fat'],
+	['city-road-end-c', 1, 'thin'],
+	['city-road-end-c', 2, 'fat'],
+	['city-road-end-v', 1, 'thin'],
+	['city-road-end-v', 1, 'fat'],
 	['t-junction', 2, 'thin'],
 	['t-junction', 2, 'fat'],
 	['city-four-connected', 1, 'fat'],
@@ -3525,6 +3529,61 @@ const STANDARD_DEFINITIONS = [
 	['city-road-end-third', 2, 'fat'],
 	['city-opposite-connected-road-second-end', 1, 'thin'],
 	['city-opposite-connected-road-second-end', 2, 'fat'],
+	['monastery-two-road-ends', 1, 'thin'],
+	['monastery-two-road-ends', 1, 'fat'],
+];
+
+// 拡張版のタイル一覧。Standard より大きい独立した山札。
+// ここだけを直接編集して構成を調整できる。
+const EXPANSION_DEFINITIONS = [
+	['straight-road', 5, 'thin'],
+	['straight-road', 8, 'fat'],
+	['curve-road-c', 2, 'thin'],
+	['curve-road-c', 3, 'fat'],
+	['curve-road-v', 3, 'thin'],
+	['curve-road-v', 6, 'fat'],
+	['city-one-side', 3, 'thin'],
+	['city-one-side', 5, 'fat'],
+	['city-one-side-straight-road', 3, 'thin'],
+	['city-one-side-straight-road', 3, 'fat'],
+	['city-one-side-curve-road-v', 2, 'thin'],
+	['city-one-side-curve-road-v', 3, 'fat'],
+	['city-one-side-curve-road-c-reverse', 2, 'thin'],
+	['city-one-side-curve-road-c-reverse', 3, 'fat'],
+	['t-junction', 3, 'thin'],
+	['t-junction', 3, 'fat'],
+	['city-four-connected', 2, 'fat'],
+	['city-three-connected', 3, 'thin'],
+	['city-three-connected', 3, 'fat'],
+	['city-three-road', 2, 'thin'],
+	['city-three-road', 3, 'fat'],
+	['city-opposite-connected', 2, 'thin'],
+	['city-opposite-connected', 3, 'fat'],
+	['city-opposite-separated', 2, 'thin'],
+	['city-opposite-separated', 3, 'fat'],
+	['city-adjacent-connected-c', 2, 'thin'],
+	['city-adjacent-connected-c', 2, 'fat'],
+	['city-adjacent-connected-v', 2, 'thin'],
+	['city-adjacent-connected-v', 3, 'fat'],
+	['city-adjacent-curve-road-c', 2, 'thin'],
+	['city-adjacent-curve-road-c', 2, 'fat'],
+	['city-adjacent-curve-road-v', 1, 'thin'],
+	['city-adjacent-curve-road-v', 3, 'fat'],
+	['city-adjacent-separated-c', 1, 'thin'],
+	['city-adjacent-separated-c', 1, 'fat'],
+	['city-adjacent-separated-v', 1, 'thin'],
+	['city-adjacent-separated-v', 1, 'fat'],
+	['city-one-t-junction', 1, 'thin'],
+	['city-one-t-junction', 3, 'fat'],
+	['cross-junction', 1, 'fat'],
+	['monastery-field', 1, 'thin'],
+	['monastery-field', 1, 'fat'],
+	['monastery-road-end', 1, 'thin'],
+	['monastery-road-end', 1, 'fat'],
+	['city-road-end-third', 1, 'thin'],
+	['city-road-end-third', 3, 'fat'],
+	['city-opposite-connected-road-second-end', 1, 'thin'],
+	['city-opposite-connected-road-second-end', 3, 'fat'],
 	['monastery-two-road-ends', 1, 'thin'],
 	['monastery-two-road-ends', 1, 'fat'],
 ];
@@ -3623,18 +3682,24 @@ const ROAD_ONLY_DEFINITIONS = [
 export const TILE_DECK_TYPES = Object.freeze({
 	lite: 'lite',
 	standard: 'standard',
+	expansion: 'expansion',
 	roadOnly: 'road-only',
 });
-export const DECK_CONFIGS = Object.freeze([
-	{ id: 'lite', label: 'Lite', description: '36枚・短時間向け' },
-	{ id: 'standard', label: 'Standard', description: '90枚・暫定基本セット' },
-	{ id: 'road-only', label: '道だけ', description: '42枚・道／交差点／修道院のみ' },
-]);
 const DECK_DEFINITIONS = Object.freeze({
 	lite: LITE_DEFINITIONS,
 	standard: STANDARD_DEFINITIONS,
+	expansion: EXPANSION_DEFINITIONS,
 	'road-only': ROAD_ONLY_DEFINITIONS,
 });
+export const DECK_CONFIGS = Object.freeze([
+	['lite', 'Lite', '短時間向け'],
+	['standard', 'Standard', '暫定基本セット'],
+	['expansion', '拡張版', '長時間向け'],
+	['road-only', '道だけ', '道／交差点／修道院のみ'],
+].map(([id, label, summary]) => {
+	const count = DECK_DEFINITIONS[id].reduce((total, [, copies]) => total + copies, 0);
+	return Object.freeze({ id, label, count, description: `${count}枚・${summary}` });
+}));
 
 function definitionsFor(deckType) {
 	const definitions = DECK_DEFINITIONS[deckType];

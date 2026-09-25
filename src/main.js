@@ -12,10 +12,10 @@ import { MEEPLE_ASSET_COUNT, meepleAssetForPlayer, meepleKindForFeature, playerC
 import { DECK_CONFIGS } from './game/TileSet.js';
 import { TITLE_DEFINITIONS, provisionalTitleLeaders } from './game/Scoring.js';
 import { structuralPositionKey } from './game/Rules.js';
-import { applyTranslations, bindLanguageSelect, deckText, t } from './ui/i18n.js';
+import { applyTranslations, deckText, language, setLanguage, t } from './ui/i18n.js';
 import { finalCrownRanks, finalScoreAtTime, scoreProgressAtTime } from './ui/ScorePresentation.js';
 
-// 開始前設定画面ができるまでの、ルールをまとめた暫定設定値。
+// 対局開始画面の選択値を開始時に反映するためのルール設定。
 const gameRules = {
 	allowVerticalMatchingPattern: true,
 	allowTerrainHalfTurn: true,
@@ -58,9 +58,7 @@ const el = {
 	confirm: document.querySelector('#confirm-placement'),
 	skip: document.querySelector('#skip-meeple'),
 	options: document.querySelector('#meeple-options'),
-	rotate: document.querySelector('#rotate-tile'),
-	terrainRotate: document.querySelector('#rotate-terrain'),
-	terrainMirror: document.querySelector('#mirror-terrain'),
+	patternCycle: document.querySelector('#cycle-placement-pattern'),
 	redo: document.querySelector('#redo-tile'),
 	forceEnd: document.querySelector('#force-end'),
 	redraw: document.querySelector('#redraw-tile'),
@@ -70,6 +68,7 @@ const el = {
 	handMode: document.querySelector('#hand-mode-select'),
 	handChoice: document.querySelector('#hand-choice'),
 	handChoiceOptions: document.querySelector('#hand-choice-options'),
+	handChoiceTrigger: document.querySelector('#open-hand-choice'),
 	matchingPatternMode: document.querySelector('#matching-pattern-mode-select'),
 	fieldRuleMode: document.querySelector('#field-rule-mode-select'),
 	matchingRuleMode: document.querySelector('#matching-rule-mode-select'),
@@ -86,44 +85,121 @@ const el = {
 	player2ColorSwatch: document.querySelector('#player2-color-swatch'),
 	player3ColorSwatch: document.querySelector('#player3-color-swatch'),
 	player4ColorSwatch: document.querySelector('#player4-color-swatch'),
-	language: document.querySelector('#language-select'),
+	player1Name: document.querySelector('#player1-name'),
+	player2Name: document.querySelector('#player2-name'),
+	player3Name: document.querySelector('#player3-name'),
+	player4Name: document.querySelector('#player4-name'),
+	languageChoices: document.querySelector('#language-choices'),
 	replayButton: document.querySelector('#replay-game'),
 };
 const playerColorSettings = Array.from({ length: 4 }, (_, index) => ({
-	select: el[`player${index + 1}Color`],
+	button: el[`player${index + 1}Color`],
+	menu: document.querySelector(`#player${index + 1}-color-menu`),
 	swatch: el[`player${index + 1}ColorSwatch`],
+	name: el[`player${index + 1}Name`],
 	container: document.querySelector(`.player-color-setting[data-player-index="${index}"]`),
+	color: selectedMeepleColor(index),
 }));
+const RULE_PRESETS = Object.freeze({
+	basic: { deck: 'lite', hand: 'single', field: false, titles: [], matching: true, pattern: true, terrain: true, mirror: true },
+	standard: { deck: 'standard', hand: 'single', field: true, titles: ['vertexKing'], matching: true, pattern: true, terrain: true, mirror: true },
+	advanced: { deck: 'expansion', hand: 'private-city-planning', field: true, titles: TITLE_DEFINITIONS.map(({ id }) => id), matching: true, pattern: true, terrain: true, mirror: true },
+});
+const ruleControls = [
+	['matching', el.matchingRuleMode], ['pattern', el.matchingPatternMode],
+	['terrain', el.terrainPatternMode], ['mirror', el.terrainMirrorMode],
+];
+let selectedRulePreset = 'standard';
+const setupRadio = (group, value) => {
+	const radio = document.querySelector(`#${group} input[value="${value}"]`);
+	if (radio) radio.checked = true;
+};
+function setSetupSwitchText() {
+	document.querySelectorAll('.setup-switch').forEach(label => {
+		const input = label.querySelector('input[type="checkbox"]');
+		label.querySelector('.switch-face').textContent = input.checked ? 'ON' : 'OFF';
+	});
+}
 const titleRuleSettings = new Map();
 for (const { id } of TITLE_DEFINITIONS) {
 	const label = document.createElement('label');
+	const icon = document.createElement('span');
 	const name = document.createElement('span');
 	name.dataset.i18n = `title.${id}`;
-	const select = document.createElement('select');
-	select.id = `title-${id}-mode-select`;
-	for (const [value, key] of [['off', 'settings.off'], ['on', 'settings.on']]) {
-		const option = document.createElement('option');
-		option.value = value;
-		option.dataset.i18n = key;
-		select.append(option);
-	}
-	label.append(name, select);
+	icon.className = `setup-rule-icon icon-${id}`;
+	icon.setAttribute('aria-hidden', 'true');
+	label.className = 'setup-switch';
+	const toggle = document.createElement('input');
+	toggle.type = 'checkbox';
+	toggle.id = `title-${id}-mode-select`;
+	const face = document.createElement('span');
+	face.className = 'switch-face';
+	label.append(icon, name, toggle, face);
 	document.querySelector('#title-rule-settings').append(label);
-	titleRuleSettings.set(id, select);
+	titleRuleSettings.set(id, toggle);
 }
 function renderDeckOptions() {
 	const selected = el.deck.value || engine.deckType;
 	el.deck.replaceChildren();
+	const choices = document.querySelector('#deck-choices');
+	choices.replaceChildren();
 	for (const deck of DECK_CONFIGS) {
 		const option = document.createElement('option'), text = deckText(deck);
 		option.value = deck.id;
 		option.textContent = text.label;
 		option.selected = deck.id === selected;
 		el.deck.append(option);
+		const label = document.createElement('label');
+		const radio = document.createElement('input');
+		const caption = document.createElement('span');
+		radio.type = 'radio'; radio.name = 'deck-choice'; radio.value = deck.id;
+		radio.checked = deck.id === selected;
+		caption.textContent = t(`setup.deck${{ 'road-only': 'Road', lite: 'Lite', standard: 'Standard', expansion: 'Expansion' }[deck.id]}`);
+		label.append(radio, caption);
+		choices.append(label);
 	}
 }
 renderDeckOptions();
-let view, tileMotion, logCameraOffset = 0, logOpen = false, handChoicePosition = null;
+playerColorSettings.forEach(({ container }, index) => {
+	const cpu = document.createElement('label');
+	const input = document.createElement('input');
+	const face = document.createElement('span');
+	cpu.className = 'setup-switch setup-cpu';
+	input.type = 'checkbox'; input.id = `player${index + 1}-cpu`; input.checked = index > 0;
+	face.className = 'switch-face';
+	cpu.append(document.createTextNode('CPU'), input, face);
+	container.append(cpu);
+});
+function setupStateMatchesPreset(preset) {
+	return el.deck.value === preset.deck && el.handMode.value === preset.hand
+		&& el.fieldRuleMode.checked === preset.field
+		&& ruleControls.every(([key, input]) => input.checked === preset[key])
+		&& [...titleRuleSettings].every(([id, input]) => input.checked === preset.titles.includes(id));
+}
+function updateSetupStatus() {
+	setSetupSwitchText();
+	const changed = !setupStateMatchesPreset(RULE_PRESETS[selectedRulePreset]);
+	document.querySelector('#custom-rules-changed').classList.toggle('hidden', !changed);
+	const minutes = ({ 'road-only': 5, lite: 5, standard: 10, expansion: 20 })[el.deck.value] || 10;
+	document.querySelector('#estimated-play-time').textContent = t('setup.estimatedTime', {
+		minutes: minutes * (el.handMode.value === 'private-city-planning' ? 3 : 1),
+	});
+}
+function applyRulePreset(id) {
+	const preset = RULE_PRESETS[id];
+	if (!preset) return;
+	selectedRulePreset = id;
+	el.deck.value = preset.deck;
+	el.handMode.value = preset.hand;
+	el.fieldRuleMode.checked = preset.field;
+	for (const [key, input] of ruleControls) input.checked = preset[key];
+	for (const [titleId, input] of titleRuleSettings) input.checked = preset.titles.includes(titleId);
+	setupRadio('deck-choices', preset.deck);
+	setupRadio('hand-mode-choices', preset.hand);
+	updateSetupStatus();
+}
+applyRulePreset('standard');
+let view, tileMotion, logCameraOffset = 0, logOpen = false, handChoicePosition = null, handChoiceChoices = [], handChoiceCollapsed = false;
 const publicHands = new PublicHands({
 	onDrag: (event, tile, canvas) => {
 		if (event.button!==0 || !gameStarted || replay || structuralSearchPending || tileMotion?.busy || engine.state.phase!=='placeTile') return;
@@ -135,17 +211,25 @@ const publicHands = new PublicHands({
 });
 let gameStarted = false;
 function renderMeepleColorOptions() {
-	playerColorSettings.forEach(({ select }, playerIndex) => {
-		const selected = Number(select.value) || selectedMeepleColor(playerIndex);
-		select.replaceChildren();
+	playerColorSettings.forEach((setting, playerIndex) => {
+		const selected = setting.color || selectedMeepleColor(playerIndex);
+		setting.color = selected;
+		setting.menu.replaceChildren();
 		for (let color = 1; color <= MEEPLE_ASSET_COUNT; color++) {
-			const option = document.createElement('option');
-			option.value = String(color);
-			option.textContent = t('setup.colorNumber', { number: String(color).padStart(2, '0') });
-			option.selected = color === selected;
-			select.append(option);
+			const option = document.createElement('button');
+			const image = document.createElement('img');
+			option.type = 'button';
+			option.className = 'meeple-color-option';
+			option.dataset.color = String(color);
+			option.setAttribute('role', 'option');
+			option.setAttribute('aria-selected', String(color === selected));
+			option.setAttribute('aria-label', t('setup.colorNumber', { number: String(color).padStart(2, '0') }));
+			image.src = `assets/meeples/meeple-lying_${color}.svg`;
+			image.alt = '';
+			option.append(image);
+			option.onclick = () => selectMeepleColor(playerIndex, color);
+			setting.menu.append(option);
 		}
-		select.value = String(selected);
 	});
 	updatePlayerCountSettings();
 	updateMeepleColorSettings();
@@ -155,14 +239,52 @@ function updatePlayerCountSettings() {
 	playerColorSettings.forEach(({ container }, index) => container.classList.toggle('hidden', index >= count));
 }
 function updateMeepleColorSettings() {
-	const colors = playerColorSettings.map(({ select }, index) => Number(select.value) || selectedMeepleColor(index));
+	const colors = playerColorSettings.map((setting, index) => setting.color || selectedMeepleColor(index));
 	setPlayerMeepleColors(colors);
-	playerColorSettings.forEach(({ swatch }, playerIndex) => {
-		swatch.src = `assets/meeples/meeple-standing_${colors[playerIndex]}.svg`;
+	playerColorSettings.forEach((setting, playerIndex) => {
+		setting.swatch.src = `assets/meeples/meeple-lying_${colors[playerIndex]}.svg`;
+		setting.button.dataset.color = String(colors[playerIndex]);
+		setting.menu.querySelectorAll('.meeple-color-option').forEach(option => option.setAttribute('aria-selected', String(Number(option.dataset.color) === colors[playerIndex])));
 	});
 	if (view) render();
 }
+function closeMeepleColorMenus() {
+	playerColorSettings.forEach(({ button, menu }) => {
+		menu.classList.add('hidden');
+		button.setAttribute('aria-expanded', 'false');
+	});
+}
+function selectMeepleColor(playerIndex, color) {
+	playerColorSettings[playerIndex].color = color;
+	closeMeepleColorMenus();
+	updateMeepleColorSettings();
+}
+function toggleMeepleColorMenu(playerIndex) {
+	const setting = playerColorSettings[playerIndex];
+	const willOpen = setting.menu.classList.contains('hidden');
+	closeMeepleColorMenus();
+	setting.menu.classList.toggle('hidden', !willOpen);
+	setting.button.setAttribute('aria-expanded', String(willOpen));
+}
+function configuredPlayerNames() {
+	return playerColorSettings.map(({ name }, index) => {
+		const requested = name.value.trim();
+		return requested ? [...requested].slice(0, Number(name.maxLength)).join('') : t('setup.defaultPlayerName', { number: index + 1 });
+	});
+}
+function syncDefaultPlayerNames() {
+	const maxLength = language() === 'en' ? 10 : 6;
+	playerColorSettings.forEach(({ name }, index) => {
+		name.maxLength = maxLength;
+		if (name.dataset.defaultName === 'true') name.value = t('setup.defaultPlayerName', { number: index + 1 });
+	});
+}
+function applyConfiguredPlayerNames() {
+	if (!engine?.state) return;
+	engine.state.players.forEach((player, index) => { player.name = configuredPlayerNames()[index]; });
+}
 renderMeepleColorOptions();
+syncDefaultPlayerNames();
 let historyHover = null, replay = null, replayedEngine = null, replayTimer = null, replayComplete = false, logSignature = '', previewDropFrame = null, finalPanelMode = 'scores';
 let displayedScores = new Map(), liveScoreAnimations = new Map(), scoreAnimationFrame = null, finalScoreReveal = null;
 let scoreElements = new Map(), crownElements = new Map();
@@ -279,8 +401,8 @@ function stopPreviewDrop() {
 	previewDropFrame = null;
 	if (view) view.previewDropOffsetY = 0;
 }
-function animateCandidatePreview(tile) {
-	closeHandChoice();
+function animateCandidatePreview(tile, { keepHandChoice = false } = {}) {
+	if (!keepHandChoice) closeHandChoice();
 	if (engine.privatePlanning) engine.selectHandTile(handTileId(tile));
 	stopPreviewDrop();
 	provisional = tile;
@@ -423,7 +545,17 @@ function selectCandidate(tile) {
 	const choices=handChoicesAtPosition(candidates,tile);
 	if (choices.length===1) { animateCandidatePreview(choices[0]); return; }
 	if (!choices.length) return;
-	handChoicePosition=tile;
+	showHandChoice(tile, choices);
+	// 複数種類を置ける候補は、先頭の種類を即座に仮置きする。
+	// 吹き出しは残るため、確定前ならいつでも別の種類に差し替えられる。
+	animateCandidatePreview(choices[0], { keepHandChoice: true });
+	el.handChoiceOptions.querySelector('button')?.focus({preventScroll:true});
+}
+function showHandChoice(position, choices) {
+	handChoicePosition=position;
+	handChoiceChoices=choices;
+	handChoiceCollapsed=false;
+	el.handChoiceTrigger.classList.add('hidden');
 	el.handChoice.classList.remove('hidden');
 	el.handChoiceOptions.replaceChildren();
 	for (const candidate of choices) {
@@ -432,37 +564,56 @@ function selectCandidate(tile) {
 		button.type='button'; button.dataset.tileId=handTileId(candidate);
 		button.setAttribute('aria-label',t('hand.number',{number:index+1})); canvas.setAttribute('aria-hidden','true');
 		canvas.choiceTile=hand[index];
-		button.append(canvas); button.onclick=()=>animateCandidatePreview(candidate);
+		button.append(canvas); button.onclick=()=>animateCandidatePreview(candidate, { keepHandChoice: true });
 		el.handChoiceOptions.append(button);
 		drawHandTile(canvas,hand[index],view);
 	}
 	positionHandChoice();
-	el.handChoiceOptions.querySelector('button')?.focus({preventScroll:true});
 }
-function closeHandChoice() { handChoicePosition=null; el.handChoice.classList.add('hidden'); }
+function collapseHandChoice() {
+	if (!handChoicePosition) return;
+	handChoiceCollapsed=true;
+	el.handChoice.classList.add('hidden');
+	el.handChoiceTrigger.classList.remove('hidden');
+	positionHandChoice();
+}
+function showCollapsedHandChoice(position, choices) {
+	if (choices.length < 2) return;
+	handChoicePosition=position;
+	handChoiceChoices=choices;
+	handChoiceCollapsed=true;
+	el.handChoice.classList.add('hidden');
+	el.handChoiceTrigger.classList.remove('hidden');
+	positionHandChoice();
+}
+function restoreHandChoice() {
+	if (!handChoicePosition || !handChoiceChoices.length) return;
+	handChoiceCollapsed=false;
+	el.handChoiceTrigger.classList.add('hidden');
+	el.handChoice.classList.remove('hidden');
+	positionHandChoice();
+}
+function closeHandChoice() {
+	handChoicePosition=null;
+	handChoiceChoices=[];
+	handChoiceCollapsed=false;
+	el.handChoice.classList.add('hidden');
+	el.handChoiceTrigger.classList.add('hidden');
+}
 function positionHandChoice() {
 	if (!handChoicePosition || !view) return;
-	const anchor=view.screenFromWorldPoint({x:handChoicePosition.centerX,y:handChoicePosition.centerY});
-	const maxRight=logOpen ? document.querySelector('#log-area').getBoundingClientRect().left-12 : innerWidth-12;
-	const obstacles=[...document.querySelectorAll('.player-box,.public-hand-tiles,.table-tools,.turn-status,.brand,#log-area:not(.hidden)')].filter(item=>item.getClientRects().length).map(item=>item.getBoundingClientRect());
-	let result=null,width,height;
-	for(const compact of [false,true]) {
-		el.handChoice.classList.toggle('compact-choice',compact);
-		width=el.handChoice.offsetWidth;height=el.handChoice.offsetHeight;
-		const rightLimit=maxRight>width+24?maxRight:innerWidth-12;
-		const xs=[anchor.x-width/2,12,rightLimit-width,...obstacles.flatMap(rect=>[rect.right+12,rect.left-width-12])];
-		const ys=[anchor.y-height-24,anchor.y+28,76,...obstacles.flatMap(rect=>[rect.bottom+12,rect.top-height-12])];
-		const positions=xs.flatMap(x=>ys.map(y=>({x,y})));
-		result=positions.filter(({x,y})=>x>=12 && x+width<=rightLimit && y>=76 && y+height<=innerHeight-12
-			&& !obstacles.some(rect=>x<rect.right+8 && x+width>rect.left-8 && y<rect.bottom+8 && y+height>rect.top-8))
-			.sort((a,b)=>Math.hypot(a.x+width/2-anchor.x,a.y+height-anchor.y)-Math.hypot(b.x+width/2-anchor.x,b.y+height-anchor.y))[0];
-		if(result) break;
-	}
-	const left=result?.x ?? Math.max(12,Math.min(anchor.x-width/2,innerWidth-width-12));
-	const top=result?.y ?? Math.max(76,Math.min(anchor.y-height-24,innerHeight-height-12));
-	el.handChoice.style.left=`${left}px`;el.handChoice.style.top=`${top}px`;
-	el.handChoice.style.setProperty('--choice-arrow-x',`${Math.max(16,Math.min(width-16,anchor.x-left))}px`);
-	for(const canvas of el.handChoiceOptions.querySelectorAll('canvas')) drawHandTile(canvas,canvas.choiceTile,view);
+	const target=provisional || handChoicePosition;
+	const anchor=view.screenFromWorldPoint({x:target.centerX,y:target.centerY});
+	const choiceElement=handChoiceCollapsed ? el.handChoiceTrigger : el.handChoice;
+	const tileRadius=view.options.side*view.camera.zoom*.72;
+	// 仮置きタイルと一体で扱う。画面端を避ける再配置はせず、吹き出しは常に上へ置く。
+	el.handChoice.classList.remove('compact-choice');
+	const width=choiceElement.offsetWidth, height=choiceElement.offsetHeight;
+	const left=anchor.x-width/2;
+	const top=anchor.y-tileRadius-height-28;
+	choiceElement.style.left=`${left}px`;choiceElement.style.top=`${top}px`;
+	choiceElement.style.setProperty('--choice-arrow-x',`${Math.max(16,Math.min(width-16,anchor.x-left))}px`);
+	if (!handChoiceCollapsed) for(const canvas of el.handChoiceOptions.querySelectorAll('canvas')) drawHandTile(canvas,canvas.choiceTile,view);
 }
 function markerFor(tile, option) {
 	return markerForFeature(tile, option, side, tileTheme.id);
@@ -492,22 +643,6 @@ function placedMeeples(entries = engine.state.meeples, historical = null) {
 		};
 	});
 }
-function alternatePlacement() {
-	if (!provisional) return null;
-	const alternatives = selectedTileCandidates().filter(
-		(candidate) =>
-			Math.hypot(candidate.centerX - provisional.centerX, candidate.centerY - provisional.centerY) <
-				1e-4 && Math.abs(Math.abs(candidate.rotation - provisional.rotation) - Math.PI) < 1e-4
-	);
-	return alternatives.find((candidate) => candidate.terrainPattern === provisional.terrainPattern && Boolean(candidate.mirrored) === Boolean(provisional.mirrored)) || null;
-}
-function sameCandidateGeometry(one, two) {
-	const full = Math.PI * 2;
-	const difference = ((one.rotation - two.rotation + Math.PI) % full + full) % full - Math.PI;
-	return one.shape === two.shape
-		&& Math.hypot(one.centerX - two.centerX, one.centerY - two.centerY) < 1e-3
-		&& Math.abs(difference) < 1e-4;
-}
 function terrainStateSignature(tile) {
 	// 地形の半回転が対称なカードでは、候補上は normal / halfTurn の2状態が
 	// あっても実際の地形・特徴領域は変わらない。その場合は切替操作を出さない。
@@ -518,30 +653,6 @@ function terrainStateSignature(tile) {
 		fieldScoreGroups: tile.fieldScoreGroups,
 		featureAnchors: tile.featureAnchors,
 	});
-}
-function terrainAlternatePlacement() {
-	if (!provisional) return null;
-	const currentSignature = terrainStateSignature(provisional);
-	const variants = selectedTileCandidates().filter(
-		(candidate) => sameCandidateGeometry(candidate, provisional)
-			&& Boolean(candidate.mirrored) === Boolean(provisional.mirrored)
-			&& terrainStateSignature(candidate) !== currentSignature,
-	);
-	if (!variants.length) return null;
-	return variants[0];
-}
-function terrainMirrorAlternatePlacement() {
-	if (!provisional) return null;
-	const variants = selectedTileCandidates().filter(
-		(candidate) => sameCandidateGeometry(candidate, provisional)
-			&& Boolean(candidate.mirrored) !== Boolean(provisional.mirrored),
-	);
-	// まず現在の地形回転を保つ反転を選び、存在しない場合でも「反転を含む」
-	// 合法状態があればボタンを出す。後者は反転と180度回転の組合せだけが
-	// 合法になるケース（city-three-connected 等）を取りこぼさないため。
-	return variants.find((candidate) => (candidate.terrainPattern || 'normal') === (provisional.terrainPattern || 'normal'))
-		|| variants[0]
-		|| null;
 }
 function provisionalPatternVariants() {
 	if (!provisional) return [];
@@ -568,19 +679,6 @@ function cycleProvisionalPattern() {
 	const current = variants.findIndex((candidate) => patternCycleKey(candidate) === patternCycleKey(provisional));
 	provisional = variants[(current + 1 + variants.length) % variants.length];
 	render();
-}
-function possiblePlacementControls() {
-	if (!provisional) return { rotate: false, terrainRotate: false, terrainMirror: false };
-	const original = provisional;
-	const possible = { rotate: false, terrainRotate: false, terrainMirror: false };
-	for (const variant of provisionalPatternVariants()) {
-		provisional = variant;
-		possible.rotate ||= Boolean(alternatePlacement());
-		possible.terrainRotate ||= Boolean(terrainAlternatePlacement());
-		possible.terrainMirror ||= Boolean(terrainMirrorAlternatePlacement());
-	}
-	provisional = original;
-	return possible;
 }
 function renderMeepleOptions() {
 	el.options.replaceChildren();
@@ -715,7 +813,7 @@ function renderScores() {
 		chips.textContent = t('player.vertexCompletions', { count: player.vertexCompletions });
 		chips.className = `chip-counts${engine.titleRules.vertexKing ? '' : ' hidden'}`;
 		supports.textContent = t('player.supportCount', { count: player.supportCount });
-		supports.className = 'support-counts';
+		supports.className = `support-counts${engine.titleRules.supportKing ? '' : ' hidden'}`;
 		scoreSummary.className = `player-score-summary${engine.state.finished && finalScoreReveal && !finalScoreReveal.active && !replay ? '' : ' hidden'}`;
 		const completedTotal = engine.state.scoreEvents.filter(event => event.playerId === player.id && event.reason === 'complete').reduce((sum, event) => sum + event.points, 0);
 		const endTotal = engine.state.scoreEvents.filter(event => event.playerId === player.id && event.reason === 'end').reduce((sum, event) => sum + event.points, 0);
@@ -792,25 +890,28 @@ function renderPlacementActions() {
 		return;
 	}
 	const point = view.screenFromWorldPoint({ x: tile.centerX, y: tile.centerY + side * .82 });
-	const possible = possiblePlacementControls();
+	const variants = engine.state.phase === 'placeTile' ? provisionalPatternVariants() : [];
+	const currentVariant = variants.findIndex((candidate) => patternCycleKey(candidate) === patternCycleKey(provisional));
 	el.placementActions.style.left = `${point.x}px`;
 	el.placementActions.style.top = `${point.y}px`;
 	el.placementActions.classList.remove('hidden');
-	// 同じ仮置き位置で到達できる全パターンを調べ、どこかで使う操作は
-	// 最初から表示する。一方、現在の状態で使えない操作は無効表示にする。
-	el.rotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.rotate);
-	el.terrainRotate.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.terrainRotate);
-	el.terrainMirror.classList.toggle('hidden', engine.state.phase !== 'placeTile' || !possible.terrainMirror);
+	const canCycle = engine.state.phase === 'placeTile' && variants.length > 1;
+	el.patternCycle.classList.toggle('hidden', !canCycle);
+	if (canCycle) {
+		const number = Math.max(0, currentVariant) + 1;
+		const label = t('board.cyclePlacement', { number, total: variants.length });
+		el.patternCycle.textContent = `${number}/${variants.length}`;
+		el.patternCycle.setAttribute('aria-label', label);
+		el.patternCycle.title = label;
+	}
 	el.confirm.classList.toggle('hidden', engine.state.phase !== 'placeTile');
 	el.skip.classList.toggle('hidden', engine.state.phase !== 'placeMeeple');
 	el.confirm.disabled = !provisional;
 	el.skip.disabled = engine.state.phase !== 'placeMeeple';
-	el.rotate.disabled = engine.state.phase !== 'placeTile' || !alternatePlacement();
-	el.terrainRotate.disabled = engine.state.phase !== 'placeTile' || !terrainAlternatePlacement();
-	el.terrainMirror.disabled = engine.state.phase !== 'placeTile' || !terrainMirrorAlternatePlacement();
-	const half = el.placementActions.offsetWidth / 2;
-	el.placementActions.style.left = `${Math.max(half + 12, Math.min(view.width - half - 12, point.x))}px`;
-	el.placementActions.style.top = `${Math.max(140, Math.min(view.height - 90, point.y))}px`;
+	el.patternCycle.disabled = !canCycle;
+	// 仮置きタイルの下に固定する。画面端では盤外へ出ても別位置へ逃がさない。
+	el.placementActions.style.left = `${point.x}px`;
+	el.placementActions.style.top = `${point.y}px`;
 }
 function render() {
 	if (engine.state.finished && replayedEngine !== engine) startReplay();
@@ -1039,16 +1140,16 @@ function startSelectedDeck() {
 	showSettings(false);
 	view.reset();
 	logCameraOffset = 0;
-	setPlayerMeepleColors(playerColorSettings.map(({ select }, index) => Number(select.value) || selectedMeepleColor(index)));
+	setPlayerMeepleColors(playerColorSettings.map((setting, index) => setting.color || selectedMeepleColor(index)));
 	clearTimeout(replayTimer);
 	historyHover = null; replayComplete = false; logSignature = '';
-	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.value === 'both';
-	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.value === 'both';
-	gameRules.allowTerrainMirror = el.terrainMirrorMode.value === 'unlimited';
-	gameRules.ignoreMatchingRules = el.matchingRuleMode.value === 'ignore';
-	const fieldScoring = el.fieldRuleMode.value !== 'disabled';
-	const titles = Object.fromEntries([...titleRuleSettings].map(([id, select]) => [id, select.value === 'on']));
-	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value });
+	gameRules.allowVerticalMatchingPattern = el.matchingPatternMode.checked;
+	gameRules.allowTerrainHalfTurn = el.terrainPatternMode.checked;
+	gameRules.allowTerrainMirror = el.terrainMirrorMode.checked;
+	gameRules.ignoreMatchingRules = !el.matchingRuleMode.checked;
+	const fieldScoring = el.fieldRuleMode.checked;
+	const titles = Object.fromEntries([...titleRuleSettings].map(([id, toggle]) => [id, toggle.checked]));
+	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, playerNames: configuredPlayerNames(), side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value });
 	resetScorePresentation();
 	provisional = null;
 	resetProgressiveDisplay();
@@ -1069,7 +1170,16 @@ tileMotion = new TileDrag({
 	getTile: () => engine.state.currentTile,
 	getCandidates: tile => engine.privatePlanning ? candidatesForHandTile(candidates,tile) : candidates,
 	canStart: () => gameStarted && !replay && !structuralSearchPending && engine.state.phase === 'placeTile',
-	onPreview: tile => { stopPreviewDrop(); provisional = tile; },
+	onPreview: tile => {
+		stopPreviewDrop();
+		provisional = tile;
+		// ドラッグで複数種類が置ける候補へ着地した場合は、展開せず再表示ボタンだけ残す。
+		if (!tile) closeHandChoice();
+		else if (engine.privatePlanning && engine.state.phase === 'placeTile') {
+			const choices=handChoicesAtPosition(candidates,tile);
+			if (choices.length > 1) showCollapsedHandChoice(tile, choices);
+		}
+	},
 	onChange: () => render(),
 });
 const settings = document.querySelector('#settings-screen');
@@ -1105,7 +1215,7 @@ document.querySelector('#confirm-dialog-accept').onclick = () => closeConfirmDia
 document.querySelector('#confirm-dialog-cancel').onclick = () => closeConfirmDialog(false);
 confirmDialog.addEventListener('cancel', event => { event.preventDefault(); closeConfirmDialog(false); });
 function selectedColorsHaveDuplicates(count = Number(el.playerCount.value) || 2) {
-	const colors = playerColorSettings.slice(0, count).map(({ select }, index) => Number(select.value) || selectedMeepleColor(index));
+	const colors = playerColorSettings.slice(0, count).map((setting, index) => setting.color || selectedMeepleColor(index));
 	return new Set(colors).size !== colors.length;
 }
 async function confirmDuplicateColors(count) {
@@ -1114,7 +1224,9 @@ async function confirmDuplicateColors(count) {
 }
 async function resumeFromSettings() {
 	if (gameStarted && !await confirmDuplicateColors(engine.state.players.length)) return;
+	applyConfiguredPlayerNames();
 	showSettings(false);
+	render();
 }
 document.querySelector('#open-settings').onclick = () => showSettings(true);
 document.querySelector('#close-settings').onclick = resumeFromSettings;
@@ -1130,15 +1242,16 @@ document.addEventListener('click', event => {
 	if (!openTitlePopover || event.target.closest('.title-icon-button, .title-popover')) return;
 	setTitlePopover(null);
 });
-document.addEventListener('pointerdown',event=>{
-	if(handChoicePosition && !el.handChoice.contains(event.target)) closeHandChoice();
-},true);
-document.querySelector('#close-hand-choice').onclick=closeHandChoice;
+document.addEventListener('click', event => {
+	if (!event.target.closest('.meeple-color-picker')) closeMeepleColorMenus();
+});
+document.querySelector('#close-hand-choice').onclick=collapseHandChoice;
+el.handChoiceTrigger.onclick=restoreHandChoice;
 el.logSectionToggle.onclick = () => { finalPanelMode = finalPanelMode === 'log' ? 'none' : 'log'; renderScores(); renderFinalLogSections(); };
 el.scoreSectionToggle.onclick = () => { finalPanelMode = finalPanelMode === 'scores' ? 'none' : 'scores'; renderScores(); renderFinalLogSections(); };
 window.addEventListener('keydown', event => {
 	if (event.key !== 'Escape') return;
-	if (handChoicePosition) { closeHandChoice(); return; }
+	if (handChoicePosition) { collapseHandChoice(); return; }
 	if (openTitlePopover) { setTitlePopover(null); return; }
 	if (tileMotion.busy) tileMotion.cancel();
 	else if (gameStarted && !settings.classList.contains('hidden')) resumeFromSettings();
@@ -1146,11 +1259,42 @@ window.addEventListener('keydown', event => {
 });
 document.querySelector('#reset-view').onclick = () => { view.reset(); syncLogCameraOffset(true); };
 window.addEventListener('resize', () => { syncLogCameraOffset(); render(); positionTitlePopover(); });
-bindLanguageSelect(el.language);
+setupRadio('language-choices', language());
+el.languageChoices.addEventListener('change', event => {
+	if (event.target.name === 'setup-language') setLanguage(event.target.value);
+});
+document.querySelector('#player-count-choices').addEventListener('change', event => {
+	el.playerCount.value = event.target.value;
+	updatePlayerCountSettings();
+});
+document.querySelector('#basic-rule-choices').addEventListener('change', event => applyRulePreset(event.target.value));
+document.querySelector('#deck-choices').addEventListener('change', event => {
+	el.deck.value = event.target.value;
+	updateSetupStatus();
+});
+document.querySelector('#hand-mode-choices').addEventListener('change', event => {
+	el.handMode.value = event.target.value;
+	updateSetupStatus();
+});
+document.querySelectorAll('.setup-switch input').forEach(input => input.addEventListener('change', updateSetupStatus));
+const customRulesToggle = document.querySelector('#custom-rules-toggle');
+const customRulesContent = document.querySelector('#custom-rules-content');
+customRulesToggle.onclick = () => {
+	const expanded = customRulesToggle.getAttribute('aria-expanded') !== 'true';
+	customRulesToggle.setAttribute('aria-expanded', String(expanded));
+	customRulesContent.setAttribute('aria-hidden', String(!expanded));
+	customRulesContent.classList.toggle('is-open', expanded);
+	customRulesContent.inert = !expanded;
+};
 applyTranslations();
+syncDefaultPlayerNames();
+updateSetupStatus();
 window.addEventListener('penrosanne-language-change', () => {
+	setupRadio('language-choices', language());
+	syncDefaultPlayerNames();
 	renderDeckOptions();
 	renderMeepleColorOptions();
+	updateSetupStatus();
 	render();
 });
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
@@ -1164,7 +1308,13 @@ el.startDeck.onclick = async () => {
 	if (!await confirmDuplicateColors()) return;
 	startSelectedDeck();
 };
-playerColorSettings.forEach(({ select }) => { select.onchange = updateMeepleColorSettings; });
+playerColorSettings.forEach(({ button, name }, index) => {
+	button.onclick = () => toggleMeepleColorMenu(index);
+	name.oninput = () => {
+		name.dataset.defaultName = 'false';
+		name.value = [...name.value].slice(0, Number(name.maxLength)).join('');
+	};
+});
 el.playerCount.onchange = updatePlayerCountSettings;
 el.replayButton.onclick = () => { tileMotion.cancel(true); startReplay(); render(); };
 el.redo.onclick = () => {
@@ -1173,30 +1323,7 @@ el.redo.onclick = () => {
 	provisional = null;
 	render();
 };
-el.rotate.onclick = () => {
-	const alternate = alternatePlacement();
-	if (alternate) {
-		stopPreviewDrop();
-		provisional = alternate;
-		render();
-	}
-};
-el.terrainRotate.onclick = () => {
-	const alternate = terrainAlternatePlacement();
-	if (alternate) {
-		stopPreviewDrop();
-		provisional = alternate;
-		render();
-	}
-};
-el.terrainMirror.onclick = () => {
-	const alternate = terrainMirrorAlternatePlacement();
-	if (alternate) {
-		stopPreviewDrop();
-		provisional = alternate;
-		render();
-	}
-};
+el.patternCycle.onclick = cycleProvisionalPattern;
 el.confirm.onclick = () => {
 	if (!provisional) return;
 	stopPreviewDrop();

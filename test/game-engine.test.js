@@ -6,7 +6,7 @@ import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, in
 import { edgeSymbolsMatch, halfTurnTerrainTile } from "../src/game/Tile.js";
 import { isComplete, scoreFeature, scoreField } from "../src/game/Scoring.js";
 import { createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
-import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, manualAnchorOrder, manualFeatureAnchorsFor, MANUAL_FEATURE_ANCHORS, mirrorTile } from "../src/game/TileSet.js";
+import { createPrototypeDeck, createPrototypeMirrorTiles, createTileCatalog, DECK_CONFIGS, manualAnchorOrder, manualFeatureAnchorsFor, MANUAL_FEATURE_ANCHORS, mirrorTile } from "../src/game/TileSet.js";
 import { TileTheme, tileAssetFilename } from "../src/ui/TileTheme.js";
 import { manualAnchorForFeature, markerForFeature } from "../src/ui/FeatureAnchors.js";
 import { MEEPLE_ASSETS, MEEPLE_ASSET_COUNT } from "../src/ui/MeepleAssets.js";
@@ -91,12 +91,20 @@ test("順次表示用の確定配置探索は同期探索と同じ順序・結�
 	assert.equal(checkpoints.at(-1), announced.length);
 });
 
-test("登録済みの Lite と Standard は、現在の定義どおりに山札を生成する", () => {
-	for (const deckType of ["lite", "standard"]) {
+test("登録済みの Lite・Standard・拡張版は、現在の定義どおりに山札を生成する", () => {
+	for (const deckType of ["lite", "standard", "expansion"]) {
 		const deck = createPrototypeDeck(fixedRandom, deckType);
 		assert.ok(deck.length >= 2);
 		assert.equal(new Set(deck.map((tile) => tile.id)).size, deck.length);
 		assert.equal(new GameEngine({ random: fixedRandom, deckType }).state.deck.length, deck.length - 2);
+	}
+});
+
+test("山札の表示枚数は現在の各デッキ定義と一致する", () => {
+	for (const config of DECK_CONFIGS) {
+		const actualCount = createPrototypeDeck(fixedRandom, config.id).length;
+		assert.equal(config.count, actualCount, config.id);
+		assert.match(config.description, new RegExp(`^${actualCount}枚`));
 	}
 });
 

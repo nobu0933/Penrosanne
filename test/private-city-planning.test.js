@@ -26,6 +26,11 @@ function finishPlacement(game,candidate) {
   if(game.state.phase==='placeMeeple') game.skipMeeple();
 }
 
+test('設定したプレイヤー名を開始時のプレイヤーへ反映し、最大10文字に制限する',()=>{
+  const game=new GameEngine({random,playerCount:3,playerNames:['あいうえおか','abcdefghijk',''],deferCandidateSearch:true});
+  assert.deepEqual(game.state.players.map(player=>player.name),['あいうえおか','abcdefghij','Player 3']);
+});
+
 test('2〜4人に3枚ずつ配り、手札と山札と開始タイルの合計が元のデッキと一致する',()=>{
   for(const count of [2,3,4]) {
     const game=new GameEngine({random,playerCount:count,handMode:'private-city-planning',deferCandidateSearch:true});
