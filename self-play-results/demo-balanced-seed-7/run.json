@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "rules": "standard-2p",
+  "createdAt": "2026-09-25T21:22:51.082Z",
+  "pairs": 1,
+  "seed": 7,
+  "codeFingerprint": "bf38a1a002e336bccab85aaae806ae591ce60bcdde206b344084b4629b9c0576",
+  "sameWeights": true,
+  "challenger": {
+    "immediate": 1,
+    "future": 0.35,
+    "meepleCost": 1.1,
+    "fieldMeepleCost": 2.2,
+    "fieldFuture": 0.22,
+    "vertex": 0.35,
+    "obstruction": 0.28,
+    "poach": 0.65,
+    "poachProximity": 0.2
+  },
+  "baseline": {
+    "immediate": 1,
+    "future": 0.35,
+    "meepleCost": 1.1,
+    "fieldMeepleCost": 2.2,
+    "fieldFuture": 0.22,
+    "vertex": 0.35,
+    "obstruction": 0.28,
+    "poach": 0.65,
+    "poachProximity": 0.2
+  }
+}

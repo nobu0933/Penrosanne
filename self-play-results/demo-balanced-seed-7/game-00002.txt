@@ -1,0 +1,90 @@
+Seed 7 / Standard / 開始タイル fat-city-one-side-curve-road-v-029
+山札指紋 68219b98884b5b1294e552fc1dfdde99b2bbf0cac7f7a13539858c1a52a8f120
+
+01. baseline: fat-monastery-field-075 (-92.3, -67.1) 回転1.257 地形normal
+02. challenger: thin-city-one-side-curve-road-v-027-mirror (35.3, -108.5) 回転-1.885 地形normal・左右反転 / ミープル city[0] / p2 city完成 +4
+03. baseline: fat-curve-road-v-016-mirror (-57.1, -175.6) 回転2.513 地形normal・左右反転
+04. challenger: fat-t-junction-040-mirror (92.3, -187.1) 回転-4.398 地形normal・左右反転
+05. baseline: thin-monastery-two-road-ends-084 (92.3, -284.2) 回転5.655 地形normal / ミープル road[1] / p1 road完成 +2
+06. challenger: thin-curve-road-v-013-mirror (70.5, -351.2) 回転3.142 地形normal・左右反転
+07. baseline: fat-city-adjacent-curve-road-v-065-mirror (92.3, 67.1) 回転1.257 地形normal・左右反転
+08. challenger: thin-city-three-road-047-mirror (206.5, 67.1) 回転-0.628 地形halfTurn・左右反転
+09. baseline: fat-monastery-two-road-ends-085 (184.7, -254.2) 回転-3.142 地形normal / ミープル road[0] / p1 road完成 +2
+10. challenger: fat-city-three-connected-045-mirror (277.0, -187.1) 回転-1.885 地形halfTurn・左右反転
+11. baseline: fat-city-one-side-022 (241.7, -78.5) 回転-0.628 地形normal
+12. challenger: fat-city-one-t-junction-072-mirror (57.1, 175.6) 回転2.513 地形halfTurn・左右反転
+13. baseline: thin-city-road-end-v-036-mirror (277.0, -284.2) 回転0.628 地形halfTurn・左右反転 / ミープル road[0] / p1 road完成 +2
+14. challenger: fat-curve-road-v-017 (-21.8, -284.2) 回転-5.027 地形normal
+15. baseline: thin-city-opposite-connected-road-second-end-081-mirror (-92.3, 30.0) 回転-2.513 地形normal・左右反転 / ミープル road[0] / p1 road完成 +4
+16. challenger: fat-straight-road-004 (391.1, -284.2) 回転-1.257 地形halfTurn
+17. baseline: thin-city-road-end-third-078 (334.1, -108.5) 回転-4.398 地形halfTurn / ミープル city[0] / p1 city完成 +8
+18. challenger: thin-city-one-side-straight-road-023 (298.8, -351.2) 回転-3.142 地形halfTurn
+19. baseline: fat-straight-road-006-mirror (426.4, -175.6) 回転-2.513 地形halfTurn・左右反転
+20. challenger: fat-city-opposite-connected-road-second-end-082 (483.4, -351.2) 回転-0.000 地形normal
+21. baseline: thin-curve-road-c-009 (-149.4, -145.6) 回転-1.257 地形normal
+22. challenger: thin-straight-road-002-mirror (-206.5, -187.1) 回転2.513 地形normal・左右反転
+23. baseline: fat-monastery-road-end-077-mirror (575.8, -284.2) 回転1.257 地形normal・左右反転 / ミープル road[0] / p1 road完成 +2
+24. challenger: thin-t-junction-038 (391.1, -67.1) 回転-0.628 地形halfTurn / ミープル road[2] / p2 road完成 +2
+25. baseline: fat-city-adjacent-separated-v-069 (-57.1, 175.6) 回転3.770 地形halfTurn / ミープル city[0] / p1 city完成 +4
+26. challenger: thin-city-adjacent-separated-c-066-mirror (-114.1, 97.1) 回転0.000 地形halfTurn・左右反転 / ミープル city[0] / p2 city完成 +4
+27. baseline: fat-city-one-side-straight-road-026 (355.9, -429.8) 回転-0.628 地形halfTurn / ミープル city[0] / p1 city完成 +4
+28. challenger: fat-curve-road-c-010 (127.6, -78.5) 回転0.628 地形halfTurn / ミープル road[0] / p2 road完成 +3
+29. baseline: fat-city-road-end-c-035-mirror (-206.5, 30.0) 回転1.885 地形normal・左右反転 / ミープル city[0] / p1 city完成 +6
+30. challenger: thin-city-one-t-junction-070-mirror (92.3, 284.2) 回転0.628 地形halfTurn・左右反転 / ミープル road[1] / p2 road完成 +2
+31. baseline: fat-city-opposite-connected-052 (391.1, -538.3) 回転-1.885 地形normal
+32. challenger: thin-curve-road-v-012-mirror (149.4, 242.7) 回転-1.885 地形halfTurn・左右反転 / ミープル road[0] / p2 road完成 +3
+33. baseline: fat-city-opposite-separated-054-mirror (92.3, 381.2) 回転-1.885 地形normal・左右反転 / ミープル city[1] / p1 city完成 +4
+34. challenger: thin-city-adjacent-separated-v-068-mirror (149.4, 459.8) 回転1.885 地形normal・左右反転
+35. baseline: fat-city-one-side-021 (57.1, 489.8) 回転-0.628 地形normal / ミープル city[0] / p1 city完成 +4
+36. challenger: fat-city-one-side-curve-road-c-reverse-031-mirror (184.7, 568.3) 回転-0.000 地形normal・左右反転 / ミープル city[0] / p2 city完成 +4
+37. baseline: thin-city-road-end-c-033 (0.0, 568.3) 回転3.142 地形normal
+38. challenger: fat-city-adjacent-connected-c-057-mirror (206.5, 164.2) 回転1.885 地形normal・左右反転 / ミープル field[0]
+39. baseline: fat-city-one-side-curve-road-v-028-mirror (-92.3, 635.4) 回転1.257 地形normal・左右反転 / ミープル city[0] / p1 city完成 +4
+40. challenger: thin-straight-road-003-mirror (-92.3, 284.2) 回転-0.628 地形normal・左右反転
+41. baseline: fat-city-adjacent-curve-road-c-062 (298.8, 97.1) 回転-3.142 地形normal / ミープル city[0]
+42. challenger: thin-city-adjacent-curve-road-c-061 (219.9, 459.8) 回転-1.885 地形normal
+43. baseline: fat-city-three-road-049 (483.4, -37.1) 回転-3.142 地形normal / ミープル road[0] / p1 road完成 +2
+44. challenger: fat-straight-road-008-mirror (-57.1, 489.8) 回転0.628 地形normal・左右反転 / ミープル field[0]
+45. baseline: thin-city-adjacent-connected-v-058 (689.9, -284.2) 回転-0.628 地形halfTurn
+46. challenger: thin-straight-road-001-mirror (-149.4, 459.8) 回転4.398 地形halfTurn・左右反転
+47. baseline: thin-city-one-side-straight-road-024 (575.8, -67.1) 回転0.628 地形halfTurn
+48. challenger: fat-city-adjacent-connected-v-059 (-206.5, -284.2) 回転5.027 地形normal
+49. baseline: fat-city-four-connected-042 (689.9, -187.1) 回転1.885 地形halfTurn
+50. challenger: thin-city-three-connected-044-mirror (-298.8, -351.2) 回転3.142 地形normal・左右反転
+51. baseline: thin-city-three-connected-043-mirror (518.7, -459.8) 回転-1.885 地形normal・左右反転
+52. challenger: thin-monastery-road-end-076-mirror (668.1, -351.2) 回転-3.142 地形normal・左右反転
+53. baseline: fat-curve-road-c-011-mirror (241.7, -429.8) 回転0.628 地形halfTurn・左右反転 / ミープル road[0]
+54. challenger: fat-city-one-side-straight-road-025-mirror (277.0, 381.2) 回転-4.398 地形halfTurn・左右反転 / ミープル city[0] / p2 city完成 +6
+55. baseline: thin-city-one-side-019-mirror (277.0, -538.3) 回転2.513 地形normal・左右反転
+56. challenger: fat-cross-junction-073 (725.2, -429.8) 回転-0.628 地形halfTurn / ミープル road[0] / p2 road完成 +2
+57. baseline: thin-city-adjacent-curve-road-v-063 (689.9, -538.3) 回転-2.513 地形halfTurn
+58. challenger: fat-straight-road-005-mirror (-114.1, -351.2) 回転0.000 地形normal・左右反転
+59. baseline: thin-city-one-side-curve-road-c-reverse-030-mirror (-149.4, -459.8) 回転1.885 地形normal・左右反転
+60. challenger: fat-city-opposite-connected-road-second-end-083 (575.8, -538.3) 回転-4.398 地形halfTurn / ミープル road[0] / p2 road完成 +3
+61. baseline: fat-city-road-end-c-034-mirror (839.3, -429.8) 回転0.628 地形normal・左右反転 / ミープル road[0] / p1 road完成 +2
+62. challenger: fat-city-road-end-third-079-mirror (-241.7, -429.8) 回転-0.628 地形normal・左右反転 / ミープル road[0]
+63. baseline: thin-city-adjacent-connected-c-056-mirror (-78.9, -459.8) 回転-1.885 地形halfTurn・左右反転
+64. challenger: fat-city-three-road-048 (-298.8, -217.1) 回転0.000 地形normal / p2 road完成 +8
+65. baseline: fat-t-junction-041 (-92.3, 381.2) 回転1.885 地形halfTurn / ミープル road[0] / p1 road完成 +3
+66. challenger: fat-city-adjacent-connected-v-060 (-391.1, -284.2) 回転1.257 地形normal
+67. baseline: fat-curve-road-v-015-mirror (540.5, -175.6) 回転2.513 地形halfTurn・左右反転
+68. challenger: fat-city-opposite-separated-055-mirror (-21.8, -538.3) 回転-4.398 地形halfTurn・左右反転 / ミープル city[0] / p2 city完成 +6
+69. baseline: thin-city-opposite-separated-053 (874.6, -538.3) 回転2.513 地形normal / ミープル city[0] / p1 city完成 +4
+70. challenger: fat-city-road-end-third-080 (874.6, -635.4) 回転5.027 地形halfTurn / ミープル city[0] / p2 city完成 +4
+71. baseline: thin-monastery-field-074-mirror (931.6, -714.0) 回転-5.027 地形normal・左右反転
+72. challenger: thin-city-opposite-connected-050 (-391.1, -187.1) 回転-2.513 地形halfTurn / ミープル city[0]
+73. baseline: fat-city-opposite-connected-051 (-241.7, 392.7) 回転2.513 地形normal
+74. challenger: fat-city-road-end-v-037 (-241.7, -78.5) 回転0.628 地形halfTurn / ミープル road[0] / p2 road完成 +2
+75. baseline: fat-curve-road-v-014-mirror (839.3, -744.0) 回転3.770 地形halfTurn・左右反転
+76. challenger: fat-straight-road-007 (127.6, -429.8) 回転-0.628 地形normal
+77. baseline: fat-city-one-t-junction-071-mirror (-184.7, 568.3) 回転0.000 地形normal・左右反転 / ミープル road[2] / p1 road完成 +3
+78. challenger: fat-city-one-side-020-mirror (-355.9, -78.5) 回転-0.628 地形halfTurn・左右反転 / ミープル city[0] / p2 city完成 +4
+79. baseline: fat-city-adjacent-curve-road-v-064 (-206.5, 284.2) 回転1.257 地形halfTurn
+80. challenger: fat-city-adjacent-separated-c-067-mirror (-355.9, -429.8) 回転0.628 地形halfTurn・左右反転 / ミープル city[1] / p2 city完成 +4
+81. baseline: fat-city-one-side-curve-road-c-reverse-032-mirror (312.3, 489.8) 回転0.628 地形halfTurn・左右反転
+82. challenger: thin-t-junction-039 (-92.3, 732.5) 回転-2.513 地形halfTurn / ミープル road[1] / p2 road完成 +3
+83. baseline: fat-city-three-connected-046 (782.2, -254.2) 回転-3.142 地形halfTurn
+
+最終得点: baseline 70 / challenger 116
+勝者: challenger
+所要時間: 197.3秒

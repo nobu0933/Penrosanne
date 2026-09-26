@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Penrosanne — CPU Training</title>
+ <link rel="stylesheet" href="cpu-training.css">
+</head>
+<body>
+ <main>
+  <header><div><h1 data-i18n="cpu.trainingTitle">CPU Training</h1><p data-i18n="cpu.trainingNote"></p></div><div class="header-actions"><select id="training-language" aria-label="Language"><option value="en">English</option><option value="ja">日本語</option></select><a href="index.html" data-i18n="nav.game">Back to game</a></div></header>
+  <section class="controls" aria-labelledby="training-controls-title">
+   <h2 id="training-controls-title" data-i18n="cpu.settings">Training settings</h2>
+   <div class="source-controls"><label><span data-i18n="cpu.sourceFolder">cpu-generation-data から選択</span><select id="training-source-folder"></select></label><label><span data-i18n="cpu.sourceDirect">世代JSONを直接指定</span><input id="training-source" type="file" accept="application/json,.json"></label><label><span data-i18n="cpu.lineageName">新しい世代の名前</span><input id="lineage-name" type="text" maxlength="24" placeholder="Alpha"></label><p id="source-status" role="status" data-i18n="cpu.sourceRequired">学習開始には世代JSONを読み込んでください。</p></div>
+   <div class="control-grid">
+    <label><span data-i18n="cpu.population">Individuals</span><input id="population-size" type="number" min="2" max="8" step="1" value="4"></label>
+    <label><span data-i18n="cpu.gamesPerGeneration">Games per generation</span><input id="games-per-generation" type="number" min="6" step="6" value="6"></label>
+    <label><span data-i18n="cpu.generationCount">Generations to run</span><input id="generation-count" type="number" min="1" max="100" step="1" value="1"></label>
+    <label><span data-i18n="cpu.mutation">Mutation strength</span><input id="mutation-strength" type="number" min="0.01" max="2" step="0.05" value="0.3"></label>
+   </div>
+   <p id="games-help" class="small"></p>
+   <div class="actions"><button id="start-training" class="primary" data-i18n="cpu.start">Start training</button><button id="stop-training" disabled data-i18n="cpu.stop">Stop</button></div>
+   <p id="training-status" role="status" aria-live="polite"></p>
+  </section>
+  <section class="controls" aria-labelledby="tournament-title">
+   <h2 id="tournament-title" data-i18n="cpu.tournamentTitle">世代間総当たり対戦</h2>
+   <p class="small" data-i18n="cpu.tournamentNote">2～4個の世代JSONの最新世代を、先手・後手を交換して対戦させます。</p>
+   <label class="file-button"><span data-i18n="cpu.tournamentFiles">世代JSONを選ぶ（2～4個）</span><input id="tournament-files" type="file" accept="application/json,.json" multiple></label>
+   <div class="actions"><button id="start-tournament" class="primary" disabled data-i18n="cpu.tournamentStart">総当たりを開始</button><button id="stop-tournament" disabled data-i18n="cpu.stop">停止</button></div>
+   <p id="tournament-status" role="status"></p>
+   <div class="table-scroll"><table id="tournament-results"></table></div>
+  </section>
+  <section class="controls supervised" aria-labelledby="supervised-title">
+   <h2 id="supervised-title" data-i18n="cpu.supervisedTitle">教師あり学習</h2>
+   <p class="small" data-i18n="cpu.supervisedNote"></p>
+   <div class="source-controls"><label><span data-i18n="cpu.manualFolder">battle-data から選択</span><select id="manual-logs-folder"></select></label><label class="file-button log-upload"><span data-i18n="cpu.manualDirect">手動対局ログを直接指定（複数可）</span><input id="manual-logs" type="file" accept="application/json,.json" multiple></label></div>
+   <p id="manual-log-status" role="status"></p>
+   <button id="start-supervised" class="primary" disabled data-i18n="cpu.supervisedStart">教師あり学習を開始</button>
+  </section>
+  <section class="history" aria-labelledby="history-title">
+   <div class="history-heading"><h2 id="history-title" data-i18n="cpu.history">Saved generations</h2><div class="history-actions"><label><span data-i18n="cpu.viewGeneration">View generation</span><select id="generation-select"></select></label><button id="export-generations" data-i18n="cpu.export">Export JSON</button><label class="file-button"><span data-i18n="cpu.import">Import JSON</span><input id="import-generations" type="file" accept="application/json,.json"></label><button id="clear-generations" class="danger" data-i18n="cpu.clearCache">一時保存をリセット</button></div></div>
+   <p id="generation-import-status" role="status"></p>
+   <p id="generation-summary"></p>
+   <div class="table-scroll"><table id="weights-table"></table></div>
+   <h3 data-i18n="cpu.matches">Matches</h3>
+   <div id="match-list"></div>
+  </section>
+ </main>
+ <script type="module" src="src/cpu-training.js"></script>
+</body>
+</html>

@@ -103,7 +103,8 @@ export class Board {
     this._geometrySignature = this.tiles
       .map((tile) => {
         const rotation = ((tile.rotation || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-        return `${tile.shape}:${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(rotation / EPSILON)}`;
+        const canonicalRotation = Math.min(rotation, Math.PI * 2 - rotation) < EPSILON ? 0 : rotation;
+        return `${tile.shape}:${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(canonicalRotation / EPSILON)}`;
       })
       .sort()
       .join(";");

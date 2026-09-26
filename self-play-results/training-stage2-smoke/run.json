@@ -1,0 +1,26 @@
+{
+  "format": 1,
+  "rules": "standard-2p",
+  "createdAt": "2026-09-26T03:40:36.594Z",
+  "rounds": 1,
+  "pairs": 1,
+  "validationPairs": 1,
+  "seed": 5,
+  "mutation": 0.3,
+  "weights": null,
+  "out": "self-play-results/training-stage2-smoke",
+  "codeFingerprint": "c246ce40c979f7d127be5a1bb080ded580d7dd30ce37cf1d909080dac9ffdcea",
+  "initialWeights": {
+    "immediate": 1,
+    "future": 0.35,
+    "meepleCost": 1.1,
+    "fieldMeepleCost": 2.2,
+    "fieldFuture": 0.22,
+    "vertex": 0.35,
+    "obstruction": 0.28,
+    "poach": 0.65,
+    "poachProximity": 0.2,
+    "obstructionMobility": 0.55,
+    "poachBridge": 0.9
+  }
+}

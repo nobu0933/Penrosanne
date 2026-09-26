@@ -1,17 +1,21 @@
 import { Board } from "./Board.js";
 import { createGameState } from "./GameState.js";
 import { createPrototypeDeck, mirrorTile } from "./TileSet.js";
-import { createFillabilityCache, featureCanReceiveMeeple, isLegalPlacement, placementCandidates, structuralPlacementFrontier, structuralPlacementFrontierProgressively, structuralPositionKey, updateFillabilityCache } from "./Rules.js";
+import { createFillabilityCache, featureCanReceiveMeeple, isLegalPlacement, placementCandidates, structuralPlacementFrontier, structuralPlacementFrontierProgressively, updateFillabilityCache } from "./Rules.js";
 import { isComplete, scoreFeature, scoreField, titleAwards, TITLE_DEFINITIONS, vertexIsFullyTiled } from "./Scoring.js";
 import { verticesFor } from "./Tile.js";
 import { createPlayer } from "./Player.js";
 import { handTileId, candidatesForHandTile } from './HandCandidates.js';
+import { createFixedTrainingLayout } from './FixedTrainingLayout.js';
 
 import { beginHistoryTurn, captureHistoryMeeples, completeHistoryTurn } from "./TurnHistory.js";
 
 export class GameEngine {
-  constructor({ playerCount=2, playerNames=[], meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single' }={}) {
+  constructor({ playerCount=2, playerNames=[], meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single', trainingPattern=null }={}) {
+    if (trainingPattern && handMode !== 'single') throw new Error('固定訓練盤面は1枚手札の自己対戦専用です。');
     this.random=random;
+    this.trainingPattern=trainingPattern;
+    this.fixedTrainingLayout=null;
     this.deckType=deckType;
     this.rules={allowVerticalMatchingPattern:rules.allowVerticalMatchingPattern ?? true,allowTerrainHalfTurn:rules.allowTerrainHalfTurn ?? true,allowTerrainMirror:rules.allowTerrainMirror ?? false,ignoreMatchingRules:rules.ignoreMatchingRules ?? false};
     this.titleRules=Object.fromEntries(TITLE_DEFINITIONS.map(({id})=>[id,Boolean(titles[id])]));
@@ -34,6 +38,7 @@ export class GameEngine {
     const start=this.state.deck.pop(); start.centerX=0;start.centerY=0;start.rotation=0;
     initializeStartTilePatterns(start,this.rules.allowVerticalMatchingPattern);
     this.state.board.add(start);
+    if (this.trainingPattern) this.fixedTrainingLayout=createFixedTrainingLayout(this.trainingPattern,start,this.state.board.side);
     this.fillabilityCache=createFillabilityCache(this.state.board,this.tileOptions);
     if (this.privatePlanning) for(let round=0;round<3;round++) for(const player of this.state.players) this.drawIntoHand(player.id);
     this.nextTurn();
@@ -59,8 +64,8 @@ export class GameEngine {
   handCandidates(tile, frontier) {
     if (resetUnplacedPlacementPatterns(tile,this.rules.allowVerticalMatchingPattern,this.rules.allowTerrainHalfTurn)) this._handCandidateCache.delete(tile.id);
     if (this._handCandidateCache.has(tile.id)) return this._handCandidateCache.get(tile.id);
-    const regular=placementCandidates(this.state.board,tile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,...this.rules})
-      .filter(candidate=>this.rules.ignoreMatchingRules || !conflictsWithForcedPlacement(candidate,frontier.forced,this.state.board.side))
+    const regular=placementCandidates(this.state.board,tile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,...this.rules,candidateFilter:this.fixedTrainingLayout?.allows})
+      .filter(candidate=>this.fixedTrainingLayout || this.rules.ignoreMatchingRules || !conflictsWithForcedPlacement(candidate,frontier.forced,this.state.board.side))
       .map(candidate=>({...candidate,_handTileId:tile.id}));
     this._handCandidateCache.set(tile.id,regular);
     return regular;
@@ -71,7 +76,7 @@ export class GameEngine {
     return this._candidateGroups={regular,forced:frontier.forced,unresolved:frontier.unresolved};
   }
   structuralFrontier() {
-    if (this.rules.ignoreMatchingRules) return this._structuralFrontier = { forced:[], unresolved:[], all:[], domainCache:new Map(), truncated:false };
+    if (this.rules.ignoreMatchingRules || this.fixedTrainingLayout) return this._structuralFrontier = { forced:[], unresolved:[], all:[], domainCache:new Map(), truncated:false };
     if (this._structuralFrontier) return this._structuralFrontier;
     const frontier = structuralPlacementFrontier(this.state.board, {
       tileOptions:this.tileOptions,
@@ -88,7 +93,7 @@ export class GameEngine {
   }
   structuralCandidates() { return this.structuralFrontier().forced; }
   async structuralFrontierProgressively({ onForced, yieldControl } = {}) {
-    if (this.rules.ignoreMatchingRules) return this._structuralFrontier = { forced:[], unresolved:[], all:[], domainCache:new Map(), truncated:false };
+    if (this.rules.ignoreMatchingRules || this.fixedTrainingLayout) return this._structuralFrontier = { forced:[], unresolved:[], all:[], domainCache:new Map(), truncated:false };
     if (this._structuralFrontier) return this._structuralFrontier;
     const frontier = await structuralPlacementFrontierProgressively(this.state.board, {
       tileOptions:this.tileOptions,
@@ -111,6 +116,10 @@ export class GameEngine {
     // パターンを必ず再評価する。
 	if (resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn)) this._candidateGroups=null;
     if(this._candidateGroups) return this._candidateGroups;
+	if (this.fixedTrainingLayout) {
+		const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,...this.rules,candidateFilter:this.fixedTrainingLayout.allows});
+		return this._candidateGroups={regular,forced:[],unresolved:[]};
+	}
 	if (this.rules.ignoreMatchingRules) {
 		const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,allowTerrainMirror:this.rules.allowTerrainMirror,ignoreMatchingRules:true});
 		return this._candidateGroups={regular,forced:[],unresolved:[]};
@@ -142,6 +151,12 @@ export class GameEngine {
     while (this.state.phase === "placeTile" && this.state.currentTile) {
       if (resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn)) this._candidateGroups=null;
       if (this._candidateGroups) return this._candidateGroups;
+      if (this.fixedTrainingLayout) {
+        const groups=this.candidateGroups();
+        if (groups.regular.length) return groups;
+        this.state.discarded.push(this.state.currentTile); this.state.currentTile=null; this._candidateGroups=null; this.nextTurn();
+        continue;
+      }
       const frontier = await this.structuralFrontierProgressively({ onForced, yieldControl });
       if (this.rules.ignoreMatchingRules) {
 		const groups=this.candidateGroups();
@@ -170,7 +185,7 @@ export class GameEngine {
       tile=structuredClone(regular);
     }
     if(!isLegalPlacement(this.state.board,tile,{allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,ignoreMatchingRules:this.rules.ignoreMatchingRules})) throw new Error("不正なタイル配置です。");
-    const previous=this.rules.ignoreMatchingRules?null:this._structuralFrontier, confirmed=previous?.forced.find(placement=>sameGeometry(placement,tile));
+    const previous=this.rules.ignoreMatchingRules||this.fixedTrainingLayout?null:this._structuralFrontier, confirmed=previous?.forced.find(placement=>samePhysicalGeometry(placement,tile));
     if(!this.rules.ignoreMatchingRules)applyMatchingPatternDomains(this.state.board,tile);
     if(this.privatePlanning) {
       this.state.hands[this.activePlayer.id]=this.handForPlayer().filter(item=>item.id!==sourceId);
@@ -369,8 +384,15 @@ function sameRotation(left=0,right=0) {
   const difference=((left-right+Math.PI)%full+full)%full-Math.PI;
   return Math.abs(difference)<1e-5;
 }
+function samePhysicalGeometry(left,right) {
+  // ひし形の外形は180度回しても同じ位置。辺記号・地形は別途合法判定する。
+  return left.shape===right.shape
+    &&Math.abs(left.centerX-right.centerX)<1e-5
+    &&Math.abs(left.centerY-right.centerY)<1e-5
+    &&(sameRotation(left.rotation,right.rotation)||sameRotation(left.rotation,(right.rotation||0)+Math.PI));
+}
 function carryStructuralFrontier(frontier, placedTile) {
-  const forced=frontier.forced.filter((placement)=>!sameGeometry(placement,placedTile));
+  const forced=frontier.forced.filter((placement)=>!samePhysicalGeometry(placement,placedTile));
   return {...frontier,forced,all:[...forced,...frontier.unresolved]};
 }
 function applyMatchingPatternDomains(board, tile) {
@@ -389,7 +411,7 @@ function applyMatchingPatternDomains(board, tile) {
 }
 function conflictsWithForcedPlacement(candidate, forced, side) {
   return forced.some((placement) => {
-    if (structuralPositionKey(candidate) === structuralPositionKey(placement)) return false;
+    if (samePhysicalGeometry(candidate,placement)) return false;
     const obstacle = new Board(side);
     obstacle.tiles = [placement];
     return obstacle.overlaps(candidate);

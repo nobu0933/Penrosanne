@@ -9,7 +9,14 @@ import { progressiveDisplayPacing } from './ui/ProgressiveDisplayTiming.js';
 import { createSearchCheckpoint, yieldForSearchPaint } from './ui/SearchProgress.js';
 import { markerForFeature } from './ui/FeatureAnchors.js';
 import { MEEPLE_ASSET_COUNT, meepleAssetForPlayer, meepleKindForFeature, playerColor, selectedMeepleColor, setPlayerMeepleColors } from './ui/MeepleAssets.js';
-import { DECK_CONFIGS } from './game/TileSet.js';
+import { DECK_CONFIGS, createPrototypeDeck } from './game/TileSet.js';
+import { chooseCpuAction, DEFAULT_CPU_WEIGHTS } from './ai/CpuPlayer.js';
+import { createCpuObservation } from './ai/CpuObservation.js';
+import { normalizeCpuPolicy, phaseForProgress } from './ai/TrainingEvolution.js';
+import { seededRandom } from './ai/SeededRandom.js';
+import { captureDecisionState, MANUAL_LOG_FORMAT } from './ai/SupervisedLearning.js';
+import { latestArchiveGeneration } from './ai/TrainingStore.js';
+import { listLocalDataFiles, readLocalDataFile } from './ai/LocalDataFiles.js';
 import { TITLE_DEFINITIONS, provisionalTitleLeaders } from './game/Scoring.js';
 import { structuralPositionKey } from './game/Rules.js';
 import { applyTranslations, deckText, language, setLanguage, t } from './ui/i18n.js';
@@ -22,7 +29,48 @@ const gameRules = {
 	allowTerrainMirror: true,
 };
 const side = Math.round(window.innerHeight / 5);
-let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules, deferCandidateSearch: true });
+function randomGameSeed() {
+	if (globalThis.crypto?.getRandomValues) return globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
+	return (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+}
+let gameSeed = randomGameSeed();
+let engine = new GameEngine({ playerCount: 2, side, fieldScoring: true, rules: gameRules, deferCandidateSearch: true, random: seededRandom(gameSeed) });
+
+function recordManualPlacement(placement) {
+	if (!gameStarted || isCpuTurn()) return;
+	pendingManualDecision = {
+		snapshot: captureDecisionState(engine, engine.candidates(), gameSeed),
+		actual: { placement: structuredClone(placement), meeple: null },
+	};
+	manualLogDecisions.push(pendingManualDecision);
+}
+
+function completeManualPlacement(meeple) {
+	if (!pendingManualDecision) return;
+	pendingManualDecision.actual.meeple = meeple ? { type: meeple.type, index: meeple.index } : null;
+	pendingManualDecision.completed = true;
+	pendingManualDecision = null;
+}
+
+function exportManualGameLog() {
+	if (!gameStarted || !engine.state.turnHistory.length) return;
+	const createdAt = new Date().toISOString();
+	const payload = {
+		format: MANUAL_LOG_FORMAT, type: 'penrosanne-manual-game-log', createdAt, gameSeed,
+		config: {
+			deckType: engine.deckType, playerCount: engine.state.players.length,
+			playerNames: engine.state.players.map(player => player.name), fieldScoring: engine.fieldScoring,
+			rules: engine.rules, titles: engine.titleRules, handMode: engine.state.handMode,
+		},
+		startTile: engine.state.board.tiles[0]?.id, decisions: manualLogDecisions.filter(decision => decision.completed),
+		turnHistory: engine.state.turnHistory, events: engine.state.events, scoreEvents: engine.state.scoreEvents,
+		finalScores: engine.state.players.map(player => ({ id: player.id, name: player.name, score: player.score })),
+	};
+	const anchor = document.createElement('a');
+	anchor.href = URL.createObjectURL(new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+	anchor.download = `penrosanne-manual-game-${createdAt.replace(/[:.]/g, '-')}.json`;
+	anchor.click(); URL.revokeObjectURL(anchor.href);
+}
 let candidates = [],
 	provisional = null,
 	hoveredPlayerIndex = null,
@@ -61,6 +109,7 @@ const el = {
 	patternCycle: document.querySelector('#cycle-placement-pattern'),
 	redo: document.querySelector('#redo-tile'),
 	forceEnd: document.querySelector('#force-end'),
+	exportManualLog: document.querySelector('#export-manual-log'),
 	redraw: document.querySelector('#redraw-tile'),
 	placementActions: document.querySelector('#placement-actions'),
 	theme: document.querySelector('#theme-select'),
@@ -75,6 +124,7 @@ const el = {
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
 	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
+	cpuGeneration: document.querySelector('#cpu-generation-select'),
 	startDeck: document.querySelector('#start-deck'),
 	playerCount: document.querySelector('#player-count-select'),
 	player1Color: document.querySelector('#player1-color'),
@@ -110,6 +160,28 @@ const ruleControls = [
 	['terrain', el.terrainPatternMode], ['mirror', el.terrainMirrorMode],
 ];
 let selectedRulePreset = 'standard';
+let cpuPlayers = [false, false, false, false], cpuCatalog = null;
+let cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
+let cpuFolderFiles = [], cpuSelectionToken = 0;
+const cpuFileCache = new Map();
+const cpuRecordLabel = document.createElement('label');
+const cpuRecordTitle = document.createElement('span');
+const cpuRecordSelect = document.createElement('select');
+cpuRecordTitle.dataset.i18n = 'cpu.generationWithinFile';
+cpuRecordTitle.textContent = t('cpu.generationWithinFile');
+cpuRecordSelect.disabled = true;
+cpuRecordLabel.append(cpuRecordTitle, cpuRecordSelect);
+el.cpuGeneration.closest('label').after(cpuRecordLabel);
+cpuRecordLabel.style.display = 'none';
+const cpuGenerationStatus = document.createElement('small');
+cpuGenerationStatus.className = 'cpu-generation-status';
+cpuGenerationStatus.setAttribute('role', 'status');
+cpuRecordLabel.after(cpuGenerationStatus);
+let cpuFolderError = false;
+let selectedCpuArchiveKey = '';
+let manualLogDecisions = [], pendingManualDecision = null;
+let cpuTurnGeneration = 0, cpuTurnRunning = false, cpuTurnTimer = null, resolveCpuPause = null;
+let pendingCpuMeeple = null;
 const setupRadio = (group, value) => {
 	const radio = document.querySelector(`#${group} input[value="${value}"]`);
 	if (radio) radio.checked = true;
@@ -202,7 +274,7 @@ applyRulePreset('standard');
 let view, tileMotion, logCameraOffset = 0, logOpen = false, handChoicePosition = null, handChoiceChoices = [], handChoiceCollapsed = false;
 const publicHands = new PublicHands({
 	onDrag: (event, tile, canvas) => {
-		if (event.button!==0 || !gameStarted || replay || structuralSearchPending || tileMotion?.busy || engine.state.phase!=='placeTile') return;
+		if (event.button!==0 || !gameStarted || replay || structuralSearchPending || tileMotion?.busy || isCpuTurn() || engine.state.phase!=='placeTile') return;
 		closeHandChoice();
 		engine.selectHandTile(tile.id);
 		tileMotion.begin(event,null,true,canvas);
@@ -210,6 +282,163 @@ const publicHands = new PublicHands({
 	onRedraw: tileId => redrawHandTile(tileId),
 });
 let gameStarted = false;
+function isCpuTurn() {
+	return gameStarted && Boolean(cpuPlayers[engine.state.turn]) && !engine.state.finished;
+}
+function syncCpuPlayers() {
+	cpuPlayers = playerColorSettings.map((_, index) => Boolean(document.querySelector(`#player${index + 1}-cpu`)?.checked));
+}
+async function applyCpuGenerationSelection() {
+	const token = ++cpuSelectionToken;
+	const value = el.cpuGeneration.value;
+	const file = value === 'latest' ? cpuFolderFiles[0] : value.startsWith('file:') ? cpuFolderFiles.find(item => item.name === value.slice(5)) : null;
+	if (!file) {
+		cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
+		cpuRecordSelect.replaceChildren(); cpuRecordSelect.disabled = true; selectedCpuArchiveKey = '';
+		cpuRecordLabel.style.display = 'none';
+		el.cpuGeneration.title = '';
+		cpuGenerationStatus.textContent = value === 'latest' && cpuFolderError ? t('cpu.folderUnavailable') : '';
+		return;
+	}
+	try {
+		const key = `${file.name}:${file.modifiedAt}:${file.size}`;
+		if (!cpuFileCache.has(key)) {
+			const payload = await readLocalDataFile('cpu', file.name);
+			latestArchiveGeneration(payload);
+			const records = (Array.isArray(payload) ? payload : payload.generations)
+				.map((record, index) => ({ record, index }))
+				.filter(({ record }) => Number.isInteger(record?.generation) && record.generation >= 0 && record.championWeights)
+				.sort((a, b) => b.record.generation - a.record.generation || b.index - a.index);
+			cpuFileCache.set(key, records.map(({ record }) => record));
+		}
+		if (token !== cpuSelectionToken) return;
+		const records = cpuFileCache.get(key);
+		const previousRecord = selectedCpuArchiveKey === key ? cpuRecordSelect.value : '';
+		cpuRecordSelect.replaceChildren(...records.map((record, index) => new Option(record.lineageName ? `${record.lineageName}${record.generation}` : t('cpu.generationOption', { number: record.generation }), String(index))));
+		cpuRecordSelect.value = previousRecord && Number(previousRecord) < records.length ? previousRecord : '0';
+		cpuRecordSelect.disabled = false; selectedCpuArchiveKey = key;
+		cpuRecordLabel.style.display = '';
+		const selected = records[Number(cpuRecordSelect.value) || 0];
+		cpuWeights = normalizeCpuPolicy(selected.championWeights);
+		el.cpuGeneration.title = file.name;
+		cpuGenerationStatus.textContent = t('cpu.usingFolderFile', { generation: `${selected.lineageName || ''}${selected.generation}` });
+	} catch (error) {
+		if (token !== cpuSelectionToken) return;
+		cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
+		cpuRecordSelect.replaceChildren(); cpuRecordSelect.disabled = true; selectedCpuArchiveKey = '';
+		cpuRecordLabel.style.display = 'none';
+		el.cpuGeneration.title = t('cpu.folderReadError', { message: error.message });
+		cpuGenerationStatus.textContent = el.cpuGeneration.title;
+		console.error('CPU generation file could not be loaded', error);
+	}
+}
+async function refreshCpuGenerationOptions() {
+	const selected = el.cpuGeneration.value || 'latest';
+	try { cpuFolderFiles = await listLocalDataFiles('cpu'); cpuFolderError = false; }
+	catch (error) { cpuFolderFiles = []; cpuFolderError = true; console.warn('CPU generation folder could not be listed', error); }
+	el.cpuGeneration.replaceChildren();
+	for (const [value, label] of [
+		['latest', t('cpu.latestFolderGeneration')], ['baseline', t('cpu.defaultGeneration')],
+		...cpuFolderFiles.map(file => [`file:${file.name}`, file.name]),
+	]) {
+		const option = document.createElement('option'); option.value = value; option.textContent = label;
+		el.cpuGeneration.append(option);
+	}
+	el.cpuGeneration.value = [...el.cpuGeneration.options].some(option => option.value === selected) ? selected : 'latest';
+	await applyCpuGenerationSelection();
+}
+function cancelCpuTurn() {
+	cpuTurnGeneration++;
+	if (cpuTurnTimer !== null) clearTimeout(cpuTurnTimer);
+	cpuTurnTimer = null;
+	resolveCpuPause?.(false);
+	resolveCpuPause = null;
+	cpuTurnRunning = false;
+}
+function cpuPause(milliseconds) {
+	return new Promise(resolve => {
+		resolveCpuPause = resolve;
+		cpuTurnTimer = setTimeout(() => {
+			cpuTurnTimer = null;
+			resolveCpuPause = null;
+			resolve(true);
+		}, milliseconds);
+	});
+}
+function cpuTurnIsCurrent(generation, playingEngine) {
+	return generation === cpuTurnGeneration && engine === playingEngine && isCpuTurn()
+		&& !replay && settings.classList.contains('hidden');
+}
+function maybeScheduleCpuTurn() {
+	if (cpuTurnRunning || structuralSearchPending || !isCpuTurn() || replay || !settings.classList.contains('hidden')) return;
+	const generation = cpuTurnGeneration, playingEngine = engine;
+	cpuTurnRunning = true;
+	cpuTurnTimer = setTimeout(() => {
+		cpuTurnTimer = null;
+		runCpuTurn(generation, playingEngine);
+	}, 180);
+}
+async function runCpuTurn(generation, playingEngine) {
+	try {
+		if (!cpuTurnIsCurrent(generation, playingEngine) || structuralSearchPending) return;
+		if (playingEngine.state.phase === 'placeMeeple') {
+			const option = pendingCpuMeeple && playingEngine.meepleOptions().find(item => item.type === pendingCpuMeeple.type && item.index === pendingCpuMeeple.index);
+			if (option) playingEngine.placeMeeple(option);
+			else playingEngine.skipMeeple();
+			pendingCpuMeeple = null;
+			refreshCandidates(); render();
+			return;
+		}
+		if (playingEngine.state.phase !== 'placeTile') return;
+		const legal = playingEngine.candidates();
+		if (!legal.length) {
+			if (playingEngine.privatePlanning) {
+				if (playingEngine.state.deck.length) playingEngine.redrawCurrentTile(playingEngine.handForPlayer()[0]?.id);
+				else playingEngine.passTurn();
+				refreshCandidates(); render();
+			}
+			return;
+		}
+		el.heading.textContent = t('game.cpuThinking', { player: displayPlayerName(playingEngine.activePlayer) });
+		await yieldForSearchPaint();
+		if (!cpuTurnIsCurrent(generation, playingEngine)) return;
+		const handCount = Object.values(playingEngine.state.hands || {}).reduce((sum, hand) => sum + hand.length, 0);
+		const totalTiles = playingEngine.state.board.tiles.length + playingEngine.state.deck.length + playingEngine.state.discarded.length + handCount + Number(Boolean(playingEngine.state.currentTile));
+		const weights = cpuWeights.phaseWeights[phaseForProgress(playingEngine.state.board.tiles.length / Math.max(1, totalTiles))];
+		const observation = createCpuObservation(playingEngine, legal, cpuCatalog);
+		const decision = chooseCpuAction(observation, {
+			weights,
+			tacticalLimit: playingEngine.state.players.length === 2 && !playingEngine.privatePlanning ? 3 : 0,
+		});
+		if (!cpuTurnIsCurrent(generation, playingEngine)) return;
+		animateCandidatePreview(decision.placement);
+		if (!await cpuPause(190) || !cpuTurnIsCurrent(generation, playingEngine)) return;
+		stopPreviewDrop();
+		removeProgressiveForcedCandidate(decision.placement);
+		playingEngine.placeTile(decision.placement);
+		pendingCpuMeeple = decision.meeple;
+		provisional = null;
+		render();
+		if (playingEngine.state.phase === 'placeMeeple') {
+			if (!await cpuPause(220) || !cpuTurnIsCurrent(generation, playingEngine)) return;
+			const option = decision.meeple && playingEngine.meepleOptions().find(item => item.type === decision.meeple.type && item.index === decision.meeple.index);
+			if (option) playingEngine.placeMeeple(option);
+			else playingEngine.skipMeeple();
+			pendingCpuMeeple = null;
+		}
+		refreshCandidates(); render();
+	} catch (error) {
+		if (generation === cpuTurnGeneration) {
+			el.heading.textContent = t('game.cpuFailed');
+			console.error(error);
+		}
+	} finally {
+		if (generation === cpuTurnGeneration) {
+			cpuTurnRunning = false;
+			maybeScheduleCpuTurn();
+		}
+	}
+}
 function renderMeepleColorOptions() {
 	playerColorSettings.forEach((setting, playerIndex) => {
 		const selected = setting.color || selectedMeepleColor(playerIndex);
@@ -373,13 +602,13 @@ view = new BoardView(el.board, {
 	// 実際のゲーム盤面では、タイル一覧より見分けやすい約2倍の大きさで描画する。
 	meepleScale: 2,
 	onFeatureSelect: (marker) => placeMeeple(marker.option),
-	onPreviewDragStart: (event) => tileMotion?.begin(event, provisional),
+	onPreviewDragStart: (event) => { if (!isCpuTurn()) tileMotion?.begin(event, provisional); },
 	isTileHeld: () => tileMotion?.busy,
 	onCancelTileDrag: () => tileMotion?.cancel(),
 	onRender: () => { if (view) { renderPlacementActions(); positionHandChoice(); } },
-	onPreviewPatternCycle: () => cycleProvisionalPattern(),
+	onPreviewPatternCycle: () => { if (!isCpuTurn()) cycleProvisionalPattern(); },
 	onSelect: (tile) => {
-		if (engine.state.phase !== 'placeTile' || structuralSearchPending || tileMotion?.busy) return;
+		if (engine.state.phase !== 'placeTile' || structuralSearchPending || tileMotion?.busy || isCpuTurn()) return;
 		selectCandidate(tile);
 	},
 	tileTheme,
@@ -471,6 +700,7 @@ function finishProgressiveDisplay(token) {
 	structuralSearchPending = false;
 	progressiveSearchResult = null;
 	render();
+	maybeScheduleCpuTurn();
 }
 function refreshCandidates() {
 	closeHandChoice();
@@ -673,6 +903,7 @@ function patternCycleKey(tile) {
 	return `${Math.round(rotation * 1e5)}:${tile.mirrored ? 'mirror' : 'normal'}:${terrainStateSignature(tile)}`;
 }
 function cycleProvisionalPattern() {
+	if (isCpuTurn()) return;
 	const variants = provisionalPatternVariants();
 	if (variants.length < 2) return;
 	stopPreviewDrop();
@@ -686,6 +917,7 @@ function renderMeepleOptions() {
 	for (const option of engine.meepleOptions()) {
 		const button = document.createElement('button');
 		button.textContent = t('feature.place', { feature: t(`feature.${option.type}`) });
+		button.disabled = isCpuTurn();
 		button.onclick = () => placeMeeple(option);
 		el.options.append(button);
 	}
@@ -885,7 +1117,7 @@ function displayPlayerName(player) {
 }
 function renderPlacementActions() {
 	const tile = provisional || (engine.state.phase === 'placeMeeple' ? engine.state.currentTile : null);
-	if (!tile || engine.state.finished || tileMotion?.busy) {
+	if (!tile || engine.state.finished || tileMotion?.busy || isCpuTurn()) {
 		el.placementActions.classList.add('hidden');
 		return;
 	}
@@ -906,9 +1138,9 @@ function renderPlacementActions() {
 	}
 	el.confirm.classList.toggle('hidden', engine.state.phase !== 'placeTile');
 	el.skip.classList.toggle('hidden', engine.state.phase !== 'placeMeeple');
-	el.confirm.disabled = !provisional;
-	el.skip.disabled = engine.state.phase !== 'placeMeeple';
-	el.patternCycle.disabled = !canCycle;
+	el.confirm.disabled = !provisional || isCpuTurn();
+	el.skip.disabled = engine.state.phase !== 'placeMeeple' || isCpuTurn();
+	el.patternCycle.disabled = !canCycle || isCpuTurn();
 	// 仮置きタイルの下に固定する。画面端では盤外へ出ても別位置へ逃がさない。
 	el.placementActions.style.left = `${point.x}px`;
 	el.placementActions.style.top = `${point.y}px`;
@@ -951,13 +1183,14 @@ function render() {
 	updateSearchStatus();
 	el.thin.textContent = state.deck.filter((tile) => tile.shape === 'thin').length;
 	el.fat.textContent = state.deck.filter((tile) => tile.shape === 'fat').length;
-	el.redo.classList.toggle('hidden', !provisional);
+	el.redo.classList.toggle('hidden', !provisional || isCpuTurn());
 	const noRegular = !searchPending && candidates.length === 0;
-	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || !state.deck.length || (!noRegular && player.redrawUsed) || Boolean(provisional);
+	el.redraw.disabled = searchPending || state.phase !== 'placeTile' || !state.deck.length || (!noRegular && player.redrawUsed) || Boolean(provisional) || isCpuTurn();
 	el.redraw.textContent = t('ui.redraw');
 	el.redraw.title = t(noRegular ? 'tile.redrawNoCandidate' : 'tile.redraw');
 	el.redraw.classList.toggle('hidden', state.phase !== 'placeTile' || Boolean(provisional));
 	el.forceEnd.disabled = state.finished || searchPending;
+	el.exportManualLog.disabled = !manualLogDecisions.some(decision => decision.completed);
 	if (tileMotion?.busy) el.redraw.disabled = true;
 	view.options.placed = state.board.tiles;
 	const visibleCandidates = engine.privatePlanning && tileMotion?.active?.sourceTile
@@ -980,7 +1213,7 @@ function render() {
 	view.highlightPlayerIndex = hoveredPlayerIndex ?? (state.phase === 'placeTile' ? state.turn : null);
 	renderMeepleOptions();
 	renderScores();
-	publicHands.render({engine,view,scoreboard:el.scores,blocked:searchPending || Boolean(tileMotion?.busy) || !gameStarted,provisional,heldTile:tileMotion?.active?.sourceTile,hidden:Boolean(replay) || state.finished});
+	publicHands.render({engine,view,scoreboard:el.scores,blocked:searchPending || Boolean(tileMotion?.busy) || !gameStarted || isCpuTurn(),provisional,heldTile:tileMotion?.active?.sourceTile,hidden:Boolean(replay) || state.finished});
 	renderTitleStatus();
 	renderLog();
 	renderFinalLogSections();
@@ -1132,6 +1365,8 @@ function startReplay() {
 }
 function startSelectedDeck() {
 	if (replay) return;
+	cancelCpuTurn();
+	pendingCpuMeeple = null;
 	stopPreviewDrop();
 	closeHandChoice();
 	finalPanelMode = 'scores';
@@ -1149,7 +1384,11 @@ function startSelectedDeck() {
 	gameRules.ignoreMatchingRules = !el.matchingRuleMode.checked;
 	const fieldScoring = el.fieldRuleMode.checked;
 	const titles = Object.fromEntries([...titleRuleSettings].map(([id, toggle]) => [id, toggle.checked]));
-	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, playerNames: configuredPlayerNames(), side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value });
+	gameSeed = randomGameSeed();
+	manualLogDecisions = []; pendingManualDecision = null;
+	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, playerNames: configuredPlayerNames(), side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value, random: seededRandom(gameSeed) });
+	syncCpuPlayers();
+	cpuCatalog = createPrototypeDeck(() => 0, el.deck.value);
 	resetScorePresentation();
 	provisional = null;
 	resetProgressiveDisplay();
@@ -1159,8 +1398,10 @@ function startSelectedDeck() {
 	render();
 }
 function placeMeeple(option) {
-	if (engine.state.phase !== 'placeMeeple') return;
+	if (engine.state.phase !== 'placeMeeple' || isCpuTurn()) return;
 	engine.placeMeeple(option);
+	completeManualPlacement(option);
+	pendingCpuMeeple = null;
 	provisional = null;
 	refreshCandidates();
 	render();
@@ -1169,7 +1410,7 @@ tileMotion = new TileDrag({
 	view, overlay: document.querySelector('#held-tile'), hand: el.currentTile,
 	getTile: () => engine.state.currentTile,
 	getCandidates: tile => engine.privatePlanning ? candidatesForHandTile(candidates,tile) : candidates,
-	canStart: () => gameStarted && !replay && !structuralSearchPending && engine.state.phase === 'placeTile',
+	canStart: () => gameStarted && !replay && !structuralSearchPending && !isCpuTurn() && engine.state.phase === 'placeTile',
 	onPreview: tile => {
 		stopPreviewDrop();
 		provisional = tile;
@@ -1184,7 +1425,12 @@ tileMotion = new TileDrag({
 });
 const settings = document.querySelector('#settings-screen');
 function showSettings(show) {
-	if (show) { tileMotion.cancel(true); closeHandChoice(); }
+	if (show) {
+		refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
+		if (cpuTurnRunning) { stopPreviewDrop(); provisional = null; }
+		cancelCpuTurn();
+		tileMotion.cancel(true); closeHandChoice();
+	}
 	settings.classList.toggle('hidden', !show);
 	for (const element of document.querySelector('.game-table').children) if (element !== settings && element !== confirmDialog) element.inert = show;
 	view.interactionLocked = show || Boolean(replay);
@@ -1224,9 +1470,12 @@ async function confirmDuplicateColors(count) {
 }
 async function resumeFromSettings() {
 	if (gameStarted && !await confirmDuplicateColors(engine.state.players.length)) return;
+	await refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	applyConfiguredPlayerNames();
+	syncCpuPlayers();
 	showSettings(false);
 	render();
+	maybeScheduleCpuTurn();
 }
 document.querySelector('#open-settings').onclick = () => showSettings(true);
 document.querySelector('#close-settings').onclick = resumeFromSettings;
@@ -1290,6 +1539,7 @@ applyTranslations();
 syncDefaultPlayerNames();
 updateSetupStatus();
 window.addEventListener('penrosanne-language-change', () => {
+	refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	setupRadio('language-choices', language());
 	syncDefaultPlayerNames();
 	renderDeckOptions();
@@ -1298,6 +1548,8 @@ window.addEventListener('penrosanne-language-change', () => {
 	render();
 });
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
+el.cpuGeneration.onchange = () => { applyCpuGenerationSelection().catch(error => console.error('CPU selection failed', error)); };
+cpuRecordSelect.onchange = () => { applyCpuGenerationSelection().catch(error => console.error('CPU generation selection failed', error)); };
 el.progressiveFrontier.onchange = () => {
 	// 実行中の探索は中断せず、切替後のモードは次の候補探索から適用する。
 	if (structuralSearchPending) return;
@@ -1306,6 +1558,7 @@ el.progressiveFrontier.onchange = () => {
 };
 el.startDeck.onclick = async () => {
 	if (!await confirmDuplicateColors()) return;
+	await refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	startSelectedDeck();
 };
 playerColorSettings.forEach(({ button, name }, index) => {
@@ -1318,6 +1571,7 @@ playerColorSettings.forEach(({ button, name }, index) => {
 el.playerCount.onchange = updatePlayerCountSettings;
 el.replayButton.onclick = () => { tileMotion.cancel(true); startReplay(); render(); };
 el.redo.onclick = () => {
+	if (isCpuTurn()) return;
 	closeHandChoice();
 	stopPreviewDrop();
 	provisional = null;
@@ -1325,25 +1579,32 @@ el.redo.onclick = () => {
 };
 el.patternCycle.onclick = cycleProvisionalPattern;
 el.confirm.onclick = () => {
-	if (!provisional) return;
+	if (!provisional || isCpuTurn()) return;
 	stopPreviewDrop();
 	const { _candidateKey, ...placement } = provisional;
 	// 確定枠の位置へ実タイルを置いた場合は、その枠だけを盤面表示から外す。
 	// ほかの既知の確定配置はそのまま残るため、追加分のアニメーションは発生しない。
 	removeProgressiveForcedCandidate(placement);
+	recordManualPlacement(placement);
 	engine.placeTile(placement);
+	// ミープル候補がない場合、GameEngine.placeTile 内で手番まで完了するため、
+	// ミープル選択イベントを待たずに手動ログも完了させる。
+	if (engine.state.phase !== 'placeMeeple') completeManualPlacement(null);
 	provisional = null;
 	refreshCandidates();
 	render();
 };
 el.skip.onclick = () => {
+	if (isCpuTurn()) return;
 	engine.skipMeeple();
+	completeManualPlacement(null);
+	pendingCpuMeeple = null;
 	provisional = null;
 	refreshCandidates();
 	render();
 };
 function redrawHandTile(tileId) {
-	if (structuralSearchPending || tileMotion?.busy || provisional) return;
+	if (structuralSearchPending || tileMotion?.busy || provisional || isCpuTurn()) return;
 	engine.redrawCurrentTile(tileId);
 	provisional = null;
 	refreshCandidates();
@@ -1351,14 +1612,18 @@ function redrawHandTile(tileId) {
 }
 el.redraw.onclick = () => redrawHandTile();
 el.forceEnd.onclick = () => {
+	cancelCpuTurn();
+	pendingCpuMeeple = null;
 	tileMotion.cancel(true);
 	gameStarted = true;
 	showSettings(false);
 	engine.finishGame();
+	completeManualPlacement(null);
 	provisional = null;
 	refreshCandidates();
 	render();
 };
+el.exportManualLog.onclick = exportManualGameLog;
 refreshCandidates();
 render();
 showSettings(true);

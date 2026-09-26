@@ -58,6 +58,9 @@ tests/
 | `Rules` | 合法手、コマ配置可否、完成判定 |
 | `Scoring` | 完成・終局時の得点計算 |
 | `CpuPlayer` | 状態を評価してゲーム操作を選ぶ |
+| `TrainingEvolution` | CPU重みの変異、先後交換の対戦計画、世代の最優秀個体選択 |
+| `BrowserSelfPlay` / `TrainingWorker` | 描画なしの固定盤面対局とブラウザ内での逐次実行 |
+| `TrainingStore` | 世代ごとの重み・結果・操作ログをIndexedDBへ保存 |
 | `Host` | 対戦ルームとゲーム状態の管理、操作検証・配信 |
 | `Client` | ホスト接続、操作送信、状態同期 |
 | `Protocol` | ネットワークのメッセージ種別とペイロード定義 |

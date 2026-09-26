@@ -1,0 +1,13 @@
+{
+  "immediate": 1,
+  "future": 0.35,
+  "meepleCost": 1.1,
+  "fieldMeepleCost": 2.2,
+  "fieldFuture": 0.22,
+  "vertex": 0.35,
+  "obstruction": 0.28,
+  "poach": 0.65,
+  "poachProximity": 0.2,
+  "obstructionMobility": 0.55,
+  "poachBridge": 0.9
+}

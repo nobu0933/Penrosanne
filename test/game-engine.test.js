@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Board } from "../src/game/Board.js";
 import { GameEngine } from "../src/game/GameEngine.js";
-import { edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPlacementFrontierProgressively, structuralPositionKey, VERTEX_PATTERNS, vertexPatternsAllow, vertexSequenceAt } from "../src/game/Rules.js";
+import { createFillabilityCache, edgeSymbolFor, featureCanReceiveMeeple, forcedVertexTypeForSequence, inferredVertexTypeForSequence, isCyclicSegment, isLegalPlacement, placementCandidateGroups, placementCandidates, structuralPlacementFrontier, structuralPlacementFrontierProgressively, structuralPositionKey, VERTEX_PATTERNS, vertexPatternsAllow, vertexSequenceAt } from "../src/game/Rules.js";
 import { edgeSymbolsMatch, halfTurnTerrainTile } from "../src/game/Tile.js";
 import { isComplete, scoreFeature, scoreField } from "../src/game/Scoring.js";
 import { createTile, edgeNames, edgesFor, localVertices, verticesFor } from "../src/game/Tile.js";
@@ -45,6 +45,36 @@ test("2π 異なる回転表現でも同じ候補位置として配置できる"
   const game = new GameEngine({ random: fixedRandom });
   const candidate = game.candidates()[0];
   assert.doesNotThrow(() => game.placeTile({ ...candidate, rotation: candidate.rotation + Math.PI * 2 }));
+});
+
+test("確定枠と同じ場所の合法候補を回転角の丸め誤差で除外しない", () => {
+  const shape = { shape: 'thin', centerX: 0, centerY: 0 };
+  assert.equal(structuralPositionKey({ ...shape, rotation: -1e-12 }), structuralPositionKey({ ...shape, rotation: 0 }));
+
+  const deck = createPrototypeDeck(fixedRandom, 'standard');
+  const thin = deck.find(tile => tile.shape === 'thin' && tile.idPrefix === 'city-one-side');
+  const fat = deck.find(tile => tile.shape === 'fat' && tile.idPrefix === 'city-one-side');
+  const game = new GameEngine({ random: fixedRandom, side: 138, rules: { allowTerrainMirror: true } });
+  const board = new Board(138);
+  board.add({ ...fat, centerX: 0, centerY: 0, rotation: Math.PI * 6 / 10, matchingPattern: null, matchingPatternOptions: ['normal', 'verticalInverse'] });
+  game.state.board = board;
+  game.state.currentTile = structuredClone(thin);
+  game.state.phase = 'placeTile';
+  game.fillabilityCache = createFillabilityCache(board, game.tileOptions);
+  game._candidateGroups = null;
+  const candidate = placementCandidates(board, game.state.currentTile, {
+    tileOptions: game.tileOptions, fillabilityCache: game.fillabilityCache, ...game.rules,
+  }).find(tile => Math.abs(tile.rotation) < 1e-8);
+  assert.ok(candidate);
+
+  for (const rotation of [-1e-12, Math.PI]) {
+    game._structuralFrontier = { forced: [{ ...candidate, rotation }], unresolved: [], all: [], domainCache: new Map() };
+    game._candidateGroups = null;
+    assert.ok(game.candidates().some(tile => Math.hypot(tile.centerX - candidate.centerX, tile.centerY - candidate.centerY) < 1e-5),
+      `確定枠の回転角 ${rotation} により同じ場所の候補が消えた`);
+  }
+  assert.doesNotThrow(() => game.placeTile(game.candidates().find(tile =>
+    Math.hypot(tile.centerX - candidate.centerX, tile.centerY - candidate.centerY) < 1e-5)));
 });
 
 test("頂点型だけで確定配置を先に探索し、未確定候補は記録しない", () => {

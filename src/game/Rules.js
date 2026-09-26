@@ -32,14 +32,15 @@ const FORCED_VERTEX_TYPE_HINTS = new Map([
 ]);
 
 // 地形、辺記号、頂点型、絶対禁則をすべて満たす通常候補だけを返す。
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false, ignoreMatchingRules = false } = {}) {
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false, ignoreMatchingRules = false, candidateFilter = null } = {}) {
 	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn, allowTerrainMirror, ignoreMatchingRules };
 	const candidates = ignoreMatchingRules
 		? terrainOnlyPlacementCandidates(board, rawTile, targets, options)
 		: matchingPlacementCandidates(board, rawTile, targets, options);
-	if (ignoreMatchingRules) return candidates;
-	if (!tileOptions.length && !fillabilityCache) return candidates;
-	return candidates.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
+	const filtered = candidateFilter ? candidates.filter(candidateFilter) : candidates;
+	if (ignoreMatchingRules) return filtered;
+	if (!tileOptions.length && !fillabilityCache) return filtered;
+	return filtered.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
 }
 
 function terrainOnlyPlacementCandidates(board, rawTile, targets, options) {
@@ -197,7 +198,10 @@ function finishStructuralFrontier(state) {
 
 export function structuralPositionKey(tile) {
 	const rotation = ((tile.rotation || 0) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-	return `${tile.shape}:${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(rotation / EPSILON)}`;
+	// 負の微小角は剰余で 2π 直前になる。同じ物理位置の 0 度と
+	// 別キーになると、確定配置との重複として合法候補を落としてしまう。
+	const canonicalRotation = Math.min(rotation, Math.PI * 2 - rotation) < EPSILON ? 0 : rotation;
+	return `${tile.shape}:${Math.round(tile.centerX / EPSILON)}:${Math.round(tile.centerY / EPSILON)}:${Math.round(canonicalRotation / EPSILON)}`;
 }
 
 function emptyPlacementFrontier() { return { forced: [], unresolved: [], all: [], domainCache: new Map(), truncated: false }; }

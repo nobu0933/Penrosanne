@@ -1,0 +1,36 @@
+{
+  "format": 1,
+  "rules": "standard-2p",
+  "createdAt": "2026-09-26T04:44:05.211Z",
+  "pairs": 1,
+  "seed": 7,
+  "codeFingerprint": "4db648ebc41f6ec6a49440265f7bdba3fb4a29a940f412a56e860e426d7ea9f3",
+  "patternFingerprint": "13d27b5e6f58818544674fe2170c118b3131972320904407534f1e081ca9ef1e",
+  "sameWeights": true,
+  "challenger": {
+    "immediate": 1,
+    "future": 0.35,
+    "meepleCost": 1.1,
+    "fieldMeepleCost": 2.2,
+    "fieldFuture": 0.22,
+    "vertex": 0.35,
+    "obstruction": 0.28,
+    "poach": 0.65,
+    "poachProximity": 0.2,
+    "obstructionMobility": 0.55,
+    "poachBridge": 0.9
+  },
+  "baseline": {
+    "immediate": 1,
+    "future": 0.35,
+    "meepleCost": 1.1,
+    "fieldMeepleCost": 2.2,
+    "fieldFuture": 0.22,
+    "vertex": 0.35,
+    "obstruction": 0.28,
+    "poach": 0.65,
+    "poachProximity": 0.2,
+    "obstructionMobility": 0.55,
+    "poachBridge": 0.9
+  }
+}

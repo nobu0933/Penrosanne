@@ -2,5 +2,5 @@
   "name": "penrosanne",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test", "generate:sample-themes": "node scripts/generate-sample-themes.mjs" }
+  "scripts": { "test": "node --test", "serve": "node scripts/serve.mjs", "generate:sample-themes": "node scripts/generate-sample-themes.mjs", "generate:training-patterns": "node scripts/generate-training-patterns.mjs", "benchmark:training-pattern": "node scripts/benchmark-fixed-training.mjs", "self-play": "node scripts/self-play.mjs", "train-cpu": "node scripts/train-cpu.mjs" }
 }
