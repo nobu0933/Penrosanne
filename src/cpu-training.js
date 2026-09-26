@@ -1,7 +1,6 @@
 import { DEFAULT_CPU_WEIGHTS } from './ai/CpuPlayer.js';
 import { gamesPerPairBlock, normalizeCpuPolicy, normalizeCpuWeights, TRAINING_PHASES, validateTrainingConfig } from './ai/TrainingEvolution.js';
 import { clearTrainingGenerations, ensureInitialGeneration, exportTrainingData, importTrainingData, latestArchiveGeneration, listTrainingGenerations, readTrainingGeneration, saveTrainingGeneration } from './ai/TrainingStore.js';
-import { listLocalDataFiles, readLocalDataFile } from './ai/LocalDataFiles.js';
 import { applyTranslations, language, setLanguage, t } from './ui/i18n.js';
 
 const el = {
@@ -14,17 +13,16 @@ const el = {
 	matches: document.querySelector('#match-list'),
 	export: document.querySelector('#export-generations'), import: document.querySelector('#import-generations'), clear: document.querySelector('#clear-generations'),
 	importStatus: document.querySelector('#generation-import-status'),
-	manualLogs: document.querySelector('#manual-logs'), manualLogsFolder: document.querySelector('#manual-logs-folder'), supervisedStart: document.querySelector('#start-supervised'), manualLogStatus: document.querySelector('#manual-log-status'),
-	source: document.querySelector('#training-source'), sourceFolder: document.querySelector('#training-source-folder'), sourceStatus: document.querySelector('#source-status'), lineageName: document.querySelector('#lineage-name'),
+	manualLogs: document.querySelector('#manual-logs'), supervisedStart: document.querySelector('#start-supervised'), manualLogStatus: document.querySelector('#manual-log-status'),
+	source: document.querySelector('#training-source'), sourceStatus: document.querySelector('#source-status'), lineageName: document.querySelector('#lineage-name'),
 	tournamentFiles: document.querySelector('#tournament-files'), tournamentStart: document.querySelector('#start-tournament'), tournamentStop: document.querySelector('#stop-tournament'), tournamentStatus: document.querySelector('#tournament-status'), tournamentResults: document.querySelector('#tournament-results'),
 };
 let summaries = [], worker = null, visibleRecord = null, previousWeights = DEFAULT_CPU_WEIGHTS, manualLogs = [], sourceGeneration = null, tournamentContenders = [], tournamentRunning = false;
-let sourceLoadToken = 0, manualLoadToken = 0;
 
 function setRunning(running) {
 	el.start.disabled = running; el.stop.disabled = !running; el.supervisedStart.disabled = running || !manualLogs.length;
 	for (const input of [el.population, el.games, el.generations, el.mutation]) input.disabled = running;
-	el.source.disabled = running; el.sourceFolder.disabled = running; el.manualLogs.disabled = running; el.manualLogsFolder.disabled = running;
+	el.source.disabled = running; el.manualLogs.disabled = running;
 	el.lineageName.disabled = running; el.tournamentFiles.disabled = running;
 	el.clear.disabled = running;
 	el.tournamentStart.disabled = running || tournamentContenders.length < 2; el.tournamentStop.disabled = !running || !tournamentRunning;
@@ -200,20 +198,15 @@ async function startTraining(supervised = false) {
 	worker.postMessage({ type: supervised ? 'startSupervised' : 'start', config, logs: manualLogs, firstGeneration: nextGeneration, baseWeights: sourceGeneration.championWeights, lineageName, runId: crypto.randomUUID() });
 }
 
-async function loadSource(fromFolder = false) {
-	const token = ++sourceLoadToken;
-	if (fromFolder) el.source.value = '';
-	else el.sourceFolder.value = '';
+async function loadSource() {
 	sourceGeneration = null;
-	const file = el.source.files?.[0], folderName = el.sourceFolder.value;
-	if (!file && !folderName) { el.sourceStatus.textContent = t('cpu.sourceRequired'); return; }
+	const file = el.source.files?.[0];
+	if (!file) { el.sourceStatus.textContent = t('cpu.sourceRequired'); return; }
 	try {
-		const payload = folderName ? await readLocalDataFile('cpu', folderName) : JSON.parse(await file.text());
-		const record = latestArchiveGeneration(payload);
-		if (token !== sourceLoadToken) return;
+		const record = latestArchiveGeneration(JSON.parse(await file.text()));
 		sourceGeneration = record;
-		el.sourceStatus.textContent = t('cpu.sourceLoaded', { file: folderName || file.name, generation: generationName(record), next: `${el.lineageName.value.trim() || '…'}${record.generation + 1}` });
-	} catch (error) { if (token === sourceLoadToken) el.sourceStatus.textContent = t('cpu.error', { message: error.message }); }
+		el.sourceStatus.textContent = t('cpu.sourceLoaded', { file: file.name, generation: generationName(record), next: `${el.lineageName.value.trim() || '…'}${record.generation + 1}` });
+	} catch (error) { el.sourceStatus.textContent = t('cpu.error', { message: error.message }); }
 }
 
 async function loadTournamentFiles() {
@@ -261,55 +254,32 @@ function startTournament() {
 }
 
 async function loadManualLogs() {
-	const token = ++manualLoadToken;
 	manualLogs = [];
 	el.supervisedStart.disabled = true;
 	try {
 		const loaded = [];
-		const folderName = el.manualLogsFolder.value;
-		if (folderName) loaded.push({ name: folderName, payload: await readLocalDataFile('battle', folderName) });
 		for (const file of el.manualLogs.files || []) loaded.push({ name: file.name, payload: JSON.parse(await file.text()) });
 		for (const { name, payload } of loaded) {
 			if (payload?.type !== 'penrosanne-manual-game-log' || payload?.format !== 1 || !Array.isArray(payload.decisions)) throw new Error(`${name}: ${t('cpu.invalidManualLog')}`);
 		}
-		if (token !== manualLoadToken) return;
 		manualLogs = loaded.map(item => item.payload);
 		const counts = manualLogs.reduce((sum, log) => sum + log.decisions.filter(decision => decision.actual?.placement).length, 0);
 		el.manualLogStatus.textContent = t('cpu.loadedManualLogs', { logs: manualLogs.length, decisions: counts });
 	} catch (error) {
-		if (token !== manualLoadToken) return;
 		manualLogs = []; el.manualLogStatus.textContent = t('cpu.error', { message: error.message });
 	}
 	el.supervisedStart.disabled = Boolean(worker) || !manualLogs.length;
 }
 
-async function populateFolderSelect(select, kind) {
-	const selected = select.value;
-	select.replaceChildren(new Option(t('cpu.chooseFolderFile'), ''));
-	try {
-		for (const file of await listLocalDataFiles(kind)) select.add(new Option(file.name, file.name));
-		select.value = [...select.options].some(option => option.value === selected) ? selected : '';
-	} catch (error) {
-		select.options[0].textContent = t('cpu.folderUnavailable');
-		console.warn(`${kind} folder could not be listed`, error);
-	}
-}
-
-async function refreshFolderSelects() {
-	await Promise.all([populateFolderSelect(el.sourceFolder, 'cpu'), populateFolderSelect(el.manualLogsFolder, 'battle')]);
-}
-
 el.population.addEventListener('input', updateGamesHelp);
 el.history.addEventListener('change', () => showGeneration(el.history.value).catch(error => { el.status.textContent = t('cpu.error', { message: error.message }); }));
-el.source.addEventListener('change', () => loadSource(false));
-el.sourceFolder.addEventListener('change', () => loadSource(true));
+el.source.addEventListener('change', loadSource);
 el.tournamentFiles.addEventListener('change', loadTournamentFiles);
 el.tournamentStart.addEventListener('click', startTournament);
 el.tournamentStop.addEventListener('click', () => { worker?.postMessage({ type: 'stop' }); el.tournamentStatus.textContent = t('cpu.stopping'); });
 el.start.addEventListener('click', () => startTraining(false));
 el.supervisedStart.addEventListener('click', () => startTraining(true));
 el.manualLogs.addEventListener('change', loadManualLogs);
-el.manualLogsFolder.addEventListener('change', loadManualLogs);
 el.stop.addEventListener('click', () => { if (worker) { worker.postMessage({ type: 'stop' }); el.status.textContent = t('cpu.stopping'); } });
 el.export.addEventListener('click', exportGenerations);
 el.import.addEventListener('change', () => importGenerations(el.import.files?.[0]));
@@ -318,8 +288,6 @@ el.language.value = language();
 el.language.addEventListener('change', () => setLanguage(el.language.value));
 window.addEventListener('penrosanne-language-change', () => {
 	el.language.value = language(); updateGamesHelp(); refreshHistory().catch(error => { el.status.textContent = t('cpu.error', { message: error.message }); });
-	refreshFolderSelects().catch(error => console.warn('Folder choices could not be refreshed', error));
 });
 applyTranslations(); updateGamesHelp();
-refreshFolderSelects().catch(error => console.warn('Folder choices could not be loaded', error));
 refreshHistory(true).catch(error => { el.status.textContent = t('cpu.error', { message: error.message }); });

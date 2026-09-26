@@ -11,7 +11,7 @@
   <header><div><h1 data-i18n="cpu.trainingTitle">CPU Training</h1><p data-i18n="cpu.trainingNote"></p></div><div class="header-actions"><select id="training-language" aria-label="Language"><option value="en">English</option><option value="ja">日本語</option></select><a href="index.html" data-i18n="nav.game">Back to game</a></div></header>
   <section class="controls" aria-labelledby="training-controls-title">
    <h2 id="training-controls-title" data-i18n="cpu.settings">Training settings</h2>
-   <div class="source-controls"><label><span data-i18n="cpu.sourceFolder">cpu-generation-data から選択</span><select id="training-source-folder"></select></label><label><span data-i18n="cpu.sourceDirect">世代JSONを直接指定</span><input id="training-source" type="file" accept="application/json,.json"></label><label><span data-i18n="cpu.lineageName">新しい世代の名前</span><input id="lineage-name" type="text" maxlength="24" placeholder="Alpha"></label><p id="source-status" role="status" data-i18n="cpu.sourceRequired">学習開始には世代JSONを読み込んでください。</p></div>
+   <div class="source-controls"><label><span data-i18n="cpu.sourceDirect">世代JSONを直接指定</span><input id="training-source" type="file" accept="application/json,.json"></label><label><span data-i18n="cpu.lineageName">新しい世代の名前</span><input id="lineage-name" type="text" maxlength="24" placeholder="Alpha"></label><p id="source-status" role="status" data-i18n="cpu.sourceRequired">学習開始には世代JSONを読み込んでください。</p></div>
    <div class="control-grid">
     <label><span data-i18n="cpu.population">Individuals</span><input id="population-size" type="number" min="2" max="8" step="1" value="4"></label>
     <label><span data-i18n="cpu.gamesPerGeneration">Games per generation</span><input id="games-per-generation" type="number" min="6" step="6" value="6"></label>
@@ -33,7 +33,7 @@
   <section class="controls supervised" aria-labelledby="supervised-title">
    <h2 id="supervised-title" data-i18n="cpu.supervisedTitle">教師あり学習</h2>
    <p class="small" data-i18n="cpu.supervisedNote"></p>
-   <div class="source-controls"><label><span data-i18n="cpu.manualFolder">battle-data から選択</span><select id="manual-logs-folder"></select></label><label class="file-button log-upload"><span data-i18n="cpu.manualDirect">手動対局ログを直接指定（複数可）</span><input id="manual-logs" type="file" accept="application/json,.json" multiple></label></div>
+   <label class="file-button log-upload"><span data-i18n="cpu.manualDirect">手動対局ログを直接指定（複数可）</span><input id="manual-logs" type="file" accept="application/json,.json" multiple></label>
    <p id="manual-log-status" role="status"></p>
    <button id="start-supervised" class="primary" disabled data-i18n="cpu.supervisedStart">教師あり学習を開始</button>
   </section>

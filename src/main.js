@@ -10,13 +10,12 @@ import { createSearchCheckpoint, yieldForSearchPaint } from './ui/SearchProgress
 import { markerForFeature } from './ui/FeatureAnchors.js';
 import { MEEPLE_ASSET_COUNT, meepleAssetForPlayer, meepleKindForFeature, playerColor, selectedMeepleColor, setPlayerMeepleColors } from './ui/MeepleAssets.js';
 import { DECK_CONFIGS, createPrototypeDeck } from './game/TileSet.js';
-import { chooseCpuAction, DEFAULT_CPU_WEIGHTS } from './ai/CpuPlayer.js';
+import { chooseCpuAction } from './ai/CpuPlayer.js';
+import { MATCH_CPU_A123 } from './ai/MatchCpuDefaults.js';
 import { createCpuObservation } from './ai/CpuObservation.js';
 import { normalizeCpuPolicy, phaseForProgress } from './ai/TrainingEvolution.js';
 import { seededRandom } from './ai/SeededRandom.js';
 import { captureDecisionState, MANUAL_LOG_FORMAT } from './ai/SupervisedLearning.js';
-import { latestArchiveGeneration } from './ai/TrainingStore.js';
-import { listLocalDataFiles, readLocalDataFile } from './ai/LocalDataFiles.js';
 import { TITLE_DEFINITIONS, provisionalTitleLeaders } from './game/Scoring.js';
 import { structuralPositionKey } from './game/Rules.js';
 import { applyTranslations, deckText, language, setLanguage, t } from './ui/i18n.js';
@@ -124,7 +123,6 @@ const el = {
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
 	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
-	cpuGeneration: document.querySelector('#cpu-generation-select'),
 	startDeck: document.querySelector('#start-deck'),
 	playerCount: document.querySelector('#player-count-select'),
 	player1Color: document.querySelector('#player1-color'),
@@ -161,24 +159,7 @@ const ruleControls = [
 ];
 let selectedRulePreset = 'standard';
 let cpuPlayers = [false, false, false, false], cpuCatalog = null;
-let cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
-let cpuFolderFiles = [], cpuSelectionToken = 0;
-const cpuFileCache = new Map();
-const cpuRecordLabel = document.createElement('label');
-const cpuRecordTitle = document.createElement('span');
-const cpuRecordSelect = document.createElement('select');
-cpuRecordTitle.dataset.i18n = 'cpu.generationWithinFile';
-cpuRecordTitle.textContent = t('cpu.generationWithinFile');
-cpuRecordSelect.disabled = true;
-cpuRecordLabel.append(cpuRecordTitle, cpuRecordSelect);
-el.cpuGeneration.closest('label').after(cpuRecordLabel);
-cpuRecordLabel.style.display = 'none';
-const cpuGenerationStatus = document.createElement('small');
-cpuGenerationStatus.className = 'cpu-generation-status';
-cpuGenerationStatus.setAttribute('role', 'status');
-cpuRecordLabel.after(cpuGenerationStatus);
-let cpuFolderError = false;
-let selectedCpuArchiveKey = '';
+const cpuWeights = normalizeCpuPolicy(MATCH_CPU_A123);
 let manualLogDecisions = [], pendingManualDecision = null;
 let cpuTurnGeneration = 0, cpuTurnRunning = false, cpuTurnTimer = null, resolveCpuPause = null;
 let pendingCpuMeeple = null;
@@ -287,65 +268,6 @@ function isCpuTurn() {
 }
 function syncCpuPlayers() {
 	cpuPlayers = playerColorSettings.map((_, index) => Boolean(document.querySelector(`#player${index + 1}-cpu`)?.checked));
-}
-async function applyCpuGenerationSelection() {
-	const token = ++cpuSelectionToken;
-	const value = el.cpuGeneration.value;
-	const file = value === 'latest' ? cpuFolderFiles[0] : value.startsWith('file:') ? cpuFolderFiles.find(item => item.name === value.slice(5)) : null;
-	if (!file) {
-		cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
-		cpuRecordSelect.replaceChildren(); cpuRecordSelect.disabled = true; selectedCpuArchiveKey = '';
-		cpuRecordLabel.style.display = 'none';
-		el.cpuGeneration.title = '';
-		cpuGenerationStatus.textContent = value === 'latest' && cpuFolderError ? t('cpu.folderUnavailable') : '';
-		return;
-	}
-	try {
-		const key = `${file.name}:${file.modifiedAt}:${file.size}`;
-		if (!cpuFileCache.has(key)) {
-			const payload = await readLocalDataFile('cpu', file.name);
-			latestArchiveGeneration(payload);
-			const records = (Array.isArray(payload) ? payload : payload.generations)
-				.map((record, index) => ({ record, index }))
-				.filter(({ record }) => Number.isInteger(record?.generation) && record.generation >= 0 && record.championWeights)
-				.sort((a, b) => b.record.generation - a.record.generation || b.index - a.index);
-			cpuFileCache.set(key, records.map(({ record }) => record));
-		}
-		if (token !== cpuSelectionToken) return;
-		const records = cpuFileCache.get(key);
-		const previousRecord = selectedCpuArchiveKey === key ? cpuRecordSelect.value : '';
-		cpuRecordSelect.replaceChildren(...records.map((record, index) => new Option(record.lineageName ? `${record.lineageName}${record.generation}` : t('cpu.generationOption', { number: record.generation }), String(index))));
-		cpuRecordSelect.value = previousRecord && Number(previousRecord) < records.length ? previousRecord : '0';
-		cpuRecordSelect.disabled = false; selectedCpuArchiveKey = key;
-		cpuRecordLabel.style.display = '';
-		const selected = records[Number(cpuRecordSelect.value) || 0];
-		cpuWeights = normalizeCpuPolicy(selected.championWeights);
-		el.cpuGeneration.title = file.name;
-		cpuGenerationStatus.textContent = t('cpu.usingFolderFile', { generation: `${selected.lineageName || ''}${selected.generation}` });
-	} catch (error) {
-		if (token !== cpuSelectionToken) return;
-		cpuWeights = normalizeCpuPolicy(DEFAULT_CPU_WEIGHTS);
-		cpuRecordSelect.replaceChildren(); cpuRecordSelect.disabled = true; selectedCpuArchiveKey = '';
-		cpuRecordLabel.style.display = 'none';
-		el.cpuGeneration.title = t('cpu.folderReadError', { message: error.message });
-		cpuGenerationStatus.textContent = el.cpuGeneration.title;
-		console.error('CPU generation file could not be loaded', error);
-	}
-}
-async function refreshCpuGenerationOptions() {
-	const selected = el.cpuGeneration.value || 'latest';
-	try { cpuFolderFiles = await listLocalDataFiles('cpu'); cpuFolderError = false; }
-	catch (error) { cpuFolderFiles = []; cpuFolderError = true; console.warn('CPU generation folder could not be listed', error); }
-	el.cpuGeneration.replaceChildren();
-	for (const [value, label] of [
-		['latest', t('cpu.latestFolderGeneration')], ['baseline', t('cpu.defaultGeneration')],
-		...cpuFolderFiles.map(file => [`file:${file.name}`, file.name]),
-	]) {
-		const option = document.createElement('option'); option.value = value; option.textContent = label;
-		el.cpuGeneration.append(option);
-	}
-	el.cpuGeneration.value = [...el.cpuGeneration.options].some(option => option.value === selected) ? selected : 'latest';
-	await applyCpuGenerationSelection();
 }
 function cancelCpuTurn() {
 	cpuTurnGeneration++;
@@ -1426,7 +1348,6 @@ tileMotion = new TileDrag({
 const settings = document.querySelector('#settings-screen');
 function showSettings(show) {
 	if (show) {
-		refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 		if (cpuTurnRunning) { stopPreviewDrop(); provisional = null; }
 		cancelCpuTurn();
 		tileMotion.cancel(true); closeHandChoice();
@@ -1470,7 +1391,6 @@ async function confirmDuplicateColors(count) {
 }
 async function resumeFromSettings() {
 	if (gameStarted && !await confirmDuplicateColors(engine.state.players.length)) return;
-	await refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	applyConfiguredPlayerNames();
 	syncCpuPlayers();
 	showSettings(false);
@@ -1539,7 +1459,6 @@ applyTranslations();
 syncDefaultPlayerNames();
 updateSetupStatus();
 window.addEventListener('penrosanne-language-change', () => {
-	refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	setupRadio('language-choices', language());
 	syncDefaultPlayerNames();
 	renderDeckOptions();
@@ -1548,8 +1467,6 @@ window.addEventListener('penrosanne-language-change', () => {
 	render();
 });
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
-el.cpuGeneration.onchange = () => { applyCpuGenerationSelection().catch(error => console.error('CPU selection failed', error)); };
-cpuRecordSelect.onchange = () => { applyCpuGenerationSelection().catch(error => console.error('CPU generation selection failed', error)); };
 el.progressiveFrontier.onchange = () => {
 	// 実行中の探索は中断せず、切替後のモードは次の候補探索から適用する。
 	if (structuralSearchPending) return;
@@ -1558,7 +1475,6 @@ el.progressiveFrontier.onchange = () => {
 };
 el.startDeck.onclick = async () => {
 	if (!await confirmDuplicateColors()) return;
-	await refreshCpuGenerationOptions().catch(error => console.error('CPU generations could not be loaded', error));
 	startSelectedDeck();
 };
 playerColorSettings.forEach(({ button, name }, index) => {
