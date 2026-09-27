@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+ <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Penrosanne — Feature Training</title>
+ <link rel="stylesheet" href="cpu-training.css"><link rel="stylesheet" href="feature-training.css">
+</head>
+<body>
+ <main>
+  <header><div><h1>Feature Training</h1><p>判断記録から特徴量を作り、学習したCPU同士を通常盤面で比較します。</p></div><div class="header-actions"><a href="cpu-training.html">CPU Training</a><a href="index.html">ゲームへ戻る</a></div></header>
+  <section aria-labelledby="step-one"><h2 id="step-one">1. 判断記録 → 特徴量JSON</h2>
+   <label>手番の記録JSON（2人・標準版・手札1枚）<input id="record-file" type="file" accept="application/json,.json"></label>
+   <div class="actions"><button id="build-features" class="primary">特徴量を生成</button><button id="stop-features" disabled>停止</button><button id="download-features" disabled>特徴量JSONを書き出す</button></div>
+   <progress id="feature-progress" max="100" value="0"></progress><p id="feature-status" role="status" aria-live="polite">判断記録を選択してください。生成には時間がかかりますが、画面は操作できます。</p>
+  </section>
+  <section aria-labelledby="step-two"><h2 id="step-two">2. 特徴量JSON → 高速な重み学習</h2>
+   <p class="small">上で生成した特徴量をそのまま使うか、以前書き出した特徴量JSONを読み込みます。</p>
+   <label>特徴量JSONを読み込む（任意）<input id="feature-file" type="file" accept="application/json,.json"></label>
+   <div class="short-grid"><label>反復回数<input id="iterations" type="number" min="1" max="200" value="32"></label><label>個体数<input id="population" type="number" min="4" max="32" value="8"></label><label>乱数シード<input id="learn-seed" type="number" min="0" max="2147483647" value="1"></label></div>
+   <div class="actions"><button id="start-learning" class="primary">学習開始</button><button id="stop-learning" disabled>停止</button><button id="download-policy" disabled>CPU JSONを書き出す</button></div>
+   <p id="learning-status" role="status" aria-live="polite">特徴量JSONを用意してください。</p><div id="learning-results"></div>
+  </section>
+  <section aria-labelledby="step-three"><h2 id="step-three">3. 書き出したCPU同士で対戦検証</h2>
+   <p class="small">CPU JSONを2つ読み込みます。同じ山札の乱数で先後を交換し、確定配置を通常どおり探索します。1組は2試合です。</p>
+   <div class="two-grid"><label>CPU A のJSON<input id="cpu-a-file" type="file" accept="application/json,.json"></label><label>CPU B のJSON<input id="cpu-b-file" type="file" accept="application/json,.json"></label></div>
+   <div class="short-grid"><label>対戦組数（先後交換）<input id="verify-pairs" type="number" min="1" max="5" value="1"></label><label>対戦シード<input id="verify-seed" type="number" min="0" max="2147483647" value="20260928"></label></div>
+   <div class="actions"><button id="start-verification" class="primary">対戦開始</button><button id="stop-verification" disabled>停止</button><button id="download-verification" disabled>結果JSONを書き出す</button></div>
+   <p id="verification-status" role="status" aria-live="polite">CPUを2つ選択してください。</p><div id="verification-results"></div>
+  </section>
+ </main>
+ <script type="module" src="src/feature-training.js"></script>
+</body>
+</html>

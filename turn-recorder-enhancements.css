@@ -1,0 +1,28 @@
+.player-hud{position:absolute;bottom:1rem;z-index:3;display:grid;grid-template-columns:auto auto;align-items:center;gap:.15rem .6rem;min-width:130px;color:#fff;text-shadow:0 1px #333;pointer-events:none}
+.player-hud.left{left:1rem}.player-hud.right{right:1rem}.player-hud strong{color:var(--player-color);font-size:.88rem}.player-hud b{font-size:1.65rem;justify-self:end}
+.reserve-icons{grid-column:1 / -1;display:flex;flex-wrap:wrap;max-width:170px}.reserve-icons img{width:19px;height:19px}
+.inventory-toggle{position:absolute;top:.8rem;left:.8rem;z-index:5}
+.inventory-panel{position:absolute;z-index:4;top:4.1rem;left:.8rem;width:min(220px,34%);max-height:48%;overflow:auto;padding:.55rem;background:#52746f;border:2px solid #e3c9b3;border-radius:9px}
+.inventory-panel h3{font-size:.78rem;margin:.2rem 0 .45rem}.inventory-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(35px,1fr));gap:2px;margin-bottom:.6rem}
+.inventory-tile{display:grid;place-items:center;background:#437700;border-radius:3px;min-height:35px}.tile-thumbnail{width:35px;height:35px}
+.preview-actions{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}.preview-actions button{font-size:.78rem;padding:.4rem .55rem}.preview-actions span{font-size:.78rem;color:#e3c9b3}
+.rating-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.3rem;border:1px solid #e3c9b3;border-radius:8px;padding:.45rem}.rating-group legend{font-size:.85rem}
+.rating-group label{display:flex;align-items:center;gap:.3rem;padding:.28rem .4rem;border:1px solid #8e705f;border-radius:5px;cursor:pointer}.rating-group label:has(input:checked){background:#568500;border-color:#e3c9b3}
+.rating-group input{width:auto;margin:0;accent-color:#e3c9b3}.annotation{border-top:1px solid #e3c9b3;padding-top:.8rem}.side-panel{background:#52746f}.candidate-list{max-height:23vh}
+.player-hud small{grid-column:1 / -1;color:#e3c9b3}.hand-tile{grid-column:1 / -1;justify-self:center;margin-top:.25rem}.hand-tile .tile-thumbnail{width:58px;height:58px}
+.meeple-options{display:flex;flex-wrap:wrap;gap:.35rem}.meeple-options button{font-size:.78rem;padding:.35rem .5rem}.meeple-options button.chosen{background:#568500;color:#fff}
+.hand-tile{position:relative;pointer-events:auto}.hand-tile canvas{display:block;width:76px;height:76px;touch-action:none;cursor:grab}.hand-tile canvas:active{cursor:grabbing}
+.hand-redraw{position:absolute;bottom:12px;white-space:nowrap;font-size:.75rem}.player-hud.right .hand-redraw{right:calc(100% + 8px)}.player-hud.left .hand-redraw{left:calc(100% + 8px)}
+#held-tile{position:fixed;inset:0;width:100vw;height:100vh;z-index:15;pointer-events:none}
+@media(min-width:761px){body{height:100vh;display:flex;flex-direction:column;overflow:hidden}main{flex:1;min-height:0;display:flex;flex-direction:column}.toolbar{flex:none}.workspace{flex:1;min-height:0;height:auto}.candidate-list{min-height:0;max-height:17vh}}
+.topbar{min-height:54px;padding:.55rem 1rem}.toolbar{padding:.5rem 1rem}.panel{gap:.5rem}.annotation{gap:.4rem}.rating-group label{padding:.15rem .3rem}.side-panel{padding:.7rem}
+@media(min-width:761px){.candidate-list{max-height:12vh}}
+.inventory-panel{width:min(248px,36%)}.inventory-tiles{grid-template-columns:repeat(auto-fill,minmax(42px,1fr))}.inventory-tile{min-height:42px;background:#56746f}.tile-thumbnail{width:42px;height:42px}
+.helper-panel{border:1px solid #e3c9b3;border-radius:8px;padding:.4rem}.helper-panel summary{cursor:pointer;font-weight:700}.helper-panel[open]{display:grid;gap:.5rem}.helper-panel .candidate-list{max-height:18vh}
+.recorder-placement-actions{position:absolute;z-index:6;display:flex;gap:8px;align-items:center;white-space:nowrap;transform:translateX(-50%)}
+.recorder-placement-actions button{width:44px;height:44px;min-width:44px;padding:0;font-size:24px}.recorder-placement-actions #cycle-preview{font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:-.04em}
+.recorder-placement-actions .ui-icon{display:block;width:24px;height:24px;margin:auto}
+.recorder-rating{position:absolute;z-index:6;left:0;top:0;width:250px;max-width:calc(100% - 12px);margin:0;transform:translateX(-50%);background:#52746f;box-shadow:0 5px #17513e}
+.recorder-rating label{font-size:.78rem}.note-helper summary{cursor:pointer;font-size:.78rem;color:#e3c9b3}.note-helper textarea{width:100%;margin-top:.45rem}
+#decision-panel #commit{position:sticky;bottom:.5rem;z-index:2}
+@media(max-width:760px){.inventory-panel{max-height:42%;width:min(180px,45%)}.player-hud{bottom:.5rem}.player-hud.right{right:.5rem}}

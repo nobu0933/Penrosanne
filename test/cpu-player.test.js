@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GameEngine } from '../src/game/GameEngine.js';
-import { chooseCpuAction, DEFAULT_CPU_WEIGHTS } from '../src/ai/CpuPlayer.js';
+import { chooseCpuAction, DEFAULT_CPU_WEIGHTS, mergerScoreDifferenceGain, scoreShareDifference } from '../src/ai/CpuPlayer.js';
 import { deriveSeed, seededRandom } from '../src/ai/SeededRandom.js';
 import { createPrototypeDeck } from '../src/game/TileSet.js';
 import { Board } from '../src/game/Board.js';
@@ -14,6 +14,17 @@ test('山札とCPUの乱数系列はシードから再現でき、系列を分�
 	const again = seededRandom(deriveSeed(123, 'deck'));
 	assert.deepEqual(Array.from({ length: 8 }, () => one()), Array.from({ length: 8 }, () => again()));
 	assert.notEqual(deriveSeed(123, 'deck'), deriveSeed(123, 'cpu-A'));
+});
+
+test('都市・道の得点差は最多所有者への配点と同数配点で決まる', () => {
+	const owners = (self, opponent, third = 0) => new Map([['p1', self], ['p2', opponent], ['p3', third]]);
+	assert.equal(scoreShareDifference(owners(2, 1), 'p1', 'p2'), 1);
+	assert.equal(scoreShareDifference(owners(1, 2), 'p1', 'p2'), -1);
+	assert.equal(scoreShareDifference(owners(1, 1), 'p1', 'p2'), 0);
+	assert.equal(scoreShareDifference(owners(1, 0, 2), 'p1', 'p2'), 0);
+	assert.equal(scoreShareDifference(owners(0, 0), 'p1', 'p2'), 0);
+	assert.equal(mergerScoreDifferenceGain(4, owners(1, 0), 20, owners(0, 1), 'p1', 'p2'), 16);
+	assert.equal(mergerScoreDifferenceGain(20, owners(1, 0), 4, owners(0, 1), 'p1', 'p2'), -16);
 });
 
 test('CPUの初版は実盤面を変更せず、エンジンが受理する合法手だけを選ぶ', () => {

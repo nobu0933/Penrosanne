@@ -24,14 +24,31 @@ export function createFixedTrainingLayout(pattern, startTile, side) {
 		return { shape: slot.shape, centerX: x * cosine - y * sine, centerY: x * sine + y * cosine, rotation: slot.rotation - anchor.rotation };
 	});
 	const index = new Map();
+	const cellSize = side * 2;
+	const nearbySlots = new Map();
 	for (const slot of slots) {
 		const key = bucket(slot.shape, slot.centerX, slot.centerY);
 		if (!index.has(key)) index.set(key, []);
 		index.get(key).push(slot);
+		const cell = `${slot.shape}:${Math.floor(slot.centerX / cellSize)}:${Math.floor(slot.centerY / cellSize)}`;
+		if (!nearbySlots.has(cell)) nearbySlots.set(cell, []);
+		nearbySlots.get(cell).push(slot);
 	}
 	return {
 		patternSeed: pattern.seed,
 		slotCount: slots.length,
+		// A generated tile sharing an edge has its centre within one side length
+		// of that edge's midpoint. Two side lengths leave ample numeric margin.
+		targetsFor(freeEdges, shape) {
+			return freeEdges.filter(({ edge }) => {
+				const x = (edge.a.x + edge.b.x) / 2, y = (edge.a.y + edge.b.y) / 2;
+				const cellX = Math.floor(x / cellSize), cellY = Math.floor(y / cellSize);
+				for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)
+					for (const slot of nearbySlots.get(`${shape}:${cellX + dx}:${cellY + dy}`) || [])
+						if (Math.hypot(slot.centerX - x, slot.centerY - y) <= side * 2 + POSITION_EPSILON) return true;
+				return false;
+			});
+		},
 		allows(tile) {
 			const x = Math.round(tile.centerX / POSITION_CELL), y = Math.round(tile.centerY / POSITION_CELL);
 			for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++)

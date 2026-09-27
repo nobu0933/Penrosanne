@@ -1,0 +1,122 @@
+{
+  "format": "penrosanne-feature-policy",
+  "version": 1,
+  "createdAt": "2026-09-27T14:50:03.676Z",
+  "source": {
+    "createdAt": "2026-09-27T11:29:17.093Z",
+    "seed": 4135258122,
+    "origin": "full",
+    "sha256": "9e83fb4e6a8030eefb0dd28e0e1d3bbf45bce85acfe2e7495a1a3e924601eb47"
+  },
+  "featureDatasetVersion": 1,
+  "method": "CMA-ES",
+  "options": {
+    "iterations": 32,
+    "population": 8,
+    "seed": 1901,
+    "regularization": 0.035
+  },
+  "phases": {
+    "early": {
+      "loss": 0.3087358698853525,
+      "dataLoss": 0.27309422017164187,
+      "informative": 18,
+      "examples": 27
+    },
+    "middle": {
+      "loss": 0.5005568048706326,
+      "dataLoss": 0.45353154715791344,
+      "informative": 20,
+      "examples": 28
+    },
+    "late": {
+      "loss": 0.6962717337727634,
+      "dataLoss": 0.6202547668605143,
+      "informative": 16,
+      "examples": 27
+    }
+  },
+  "phaseWeights": {
+    "early": {
+      "immediate": 0.9571789098134725,
+      "future": 2.0992139291439083,
+      "meepleCost": 0.6875119254307496,
+      "fieldMeepleCost": 1.2575215100620658,
+      "fieldFuture": 0.42406024192812597,
+      "vertex": 0.5127222884180082,
+      "obstruction": 0.11563201816271616,
+      "poach": 2.320514217223141,
+      "poachProximity": 0.05475654049749472,
+      "obstructionMobility": 0.44572016980409546,
+      "poachBridge": 1.6073705075617684
+    },
+    "middle": {
+      "immediate": 0.7836845275716612,
+      "future": 0.3787726451903849,
+      "meepleCost": 1.068333596931375,
+      "fieldMeepleCost": 0.9118880418522809,
+      "fieldFuture": 0.029325192627469267,
+      "vertex": 0.40095950577013584,
+      "obstruction": 0.18702844591515097,
+      "poach": 0.4946902290151302,
+      "poachProximity": 0.013865603933138704,
+      "obstructionMobility": 0.3570081293563252,
+      "poachBridge": 0.5306108974181425
+    },
+    "late": {
+      "immediate": 0.970594675865005,
+      "future": 0.6771874169017859,
+      "meepleCost": 1.307705955642697,
+      "fieldMeepleCost": 1.54541748795723,
+      "fieldFuture": 0.6430283732815516,
+      "vertex": 1.091488315222163,
+      "obstruction": 0.3465566230239058,
+      "poach": 1.3315519725055456,
+      "poachProximity": 0.028470545592173557,
+      "obstructionMobility": 0.22005644465826515,
+      "poachBridge": 0.9792832709546374
+    }
+  },
+  "baseline": {
+    "early": {
+      "immediate": 0.60752,
+      "future": 1.11371,
+      "meepleCost": 1.1,
+      "fieldMeepleCost": 1.71401,
+      "fieldFuture": 0.41639,
+      "vertex": 0.47975,
+      "obstruction": 0.12132,
+      "poach": 2.41559,
+      "poachProximity": 0.05218,
+      "obstructionMobility": 0.34224,
+      "poachBridge": 1.43863
+    },
+    "middle": {
+      "immediate": 0.29024,
+      "future": 0.58642,
+      "meepleCost": 1.28125,
+      "fieldMeepleCost": 0.70998,
+      "fieldFuture": 0.03219,
+      "vertex": 0.40802,
+      "obstruction": 0.17893,
+      "poach": 0.43946,
+      "poachProximity": 0.01413,
+      "obstructionMobility": 0.28899,
+      "poachBridge": 0.52293
+    },
+    "late": {
+      "immediate": 0.67078,
+      "future": 0.6334,
+      "meepleCost": 1.89425,
+      "fieldMeepleCost": 1.89746,
+      "fieldFuture": 0.38525,
+      "vertex": 1.9527,
+      "obstruction": 0.34471,
+      "poach": 1.31652,
+      "poachProximity": 0.03547,
+      "obstructionMobility": 0.65841,
+      "poachBridge": 1.01318
+    }
+  },
+  "learningElapsedMs": 162
+}

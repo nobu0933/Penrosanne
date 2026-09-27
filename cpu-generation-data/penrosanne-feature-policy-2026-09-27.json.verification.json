@@ -1,0 +1,25 @@
+{
+  "baseline": "D210",
+  "fixedTrainingLayout": false,
+  "seed": 1001901,
+  "games": [
+    {
+      "seed": 1001901,
+      "trainedFirst": true,
+      "trainedScore": 91,
+      "baselineScore": 125,
+      "elapsedMs": 53926
+    },
+    {
+      "seed": 1001901,
+      "trainedFirst": false,
+      "trainedScore": 85,
+      "baselineScore": 104,
+      "elapsedMs": 107749
+    }
+  ],
+  "wins": 0,
+  "draws": 0,
+  "losses": 2,
+  "scoreDifference": -53
+}

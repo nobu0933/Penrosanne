@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ja">
+<head>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>手番の記録 | Penrosanne</title>
+ <link rel="stylesheet" href="turn-recorder.css">
+ <link rel="stylesheet" href="turn-recorder-enhancements.css">
+</head>
+<body>
+ <header class="topbar"><a href="index.html">PENROSANNE</a><strong>手番の記録</strong><button id="download" disabled>JSONを書き出す</button></header>
+ <main>
+  <section class="toolbar" aria-label="記録の開始">
+   <label>開始方法<select id="mode"><option value="full">通常対局を記録</option><option value="cpu">CPUで局面生成</option><option value="editor">局面を直接編集</option></select></label>
+   <label class="cpu-setting">CPUの手数<input id="cpu-turns" type="number" min="0" max="100" value="20"></label>
+   <label>乱数シード<input id="seed" type="number" min="0" step="1" placeholder="空欄でランダム"></label>
+   <button id="start" class="primary">開始</button>
+   <span id="active-seed" class="hint"></span>
+   <button id="back-turn" disabled>前の番へ</button>
+   <span id="status" role="status">開始方法を選んでください。</span>
+  </section>
+  <section class="workspace">
+   <div class="board-wrap"><canvas id="board" aria-label="記録用盤面"></canvas>
+    <div id="player-0" class="player-hud right"></div><div id="player-1" class="player-hud left"></div>
+    <div id="placement-actions" class="recorder-placement-actions hidden"><button id="cancel-preview" title="仮置きを取り消す" aria-label="仮置きを取り消す"><img class="ui-icon" src="assets/icons/close.svg" alt=""></button><button id="cycle-preview" class="hidden" title="設置方向を切り替え"></button><button id="confirm-preview" class="primary" title="配置を確定" aria-label="配置を確定"><img class="ui-icon" src="assets/icons/check.svg" alt=""></button><button id="skip-preview-meeple" title="ミープルを置かない" aria-label="ミープルを置かない"><img class="ui-icon" src="assets/icons/forward.svg" alt=""></button></div>
+    <fieldset id="rating-popover" class="rating-group recorder-rating hidden"><legend>評価</legend>
+     <label><input type="radio" name="rating" value="unreviewed" checked>未検討</label>
+     <label><input type="radio" name="rating" value="runner-up">次点</label>
+     <label><input type="radio" name="rating" value="risky">危険</label>
+     <label><input type="radio" name="rating" value="bad">悪い</label>
+     <label><input type="radio" name="rating" value="confident">自信あり</label>
+     <label><input type="radio" name="rating" value="uncertain">迷った</label>
+     <label><input type="radio" name="rating" value="guess">強いか不明</label>
+    </fieldset>
+    <button id="inventory-toggle" class="inventory-toggle hidden">山札・破棄を見る</button>
+    <div id="inventory-panel" class="inventory-panel hidden"><h3>残り山札 <span id="deck-count"></span></h3><div id="deck-tiles" class="inventory-tiles"></div><h3>破棄 <span id="discard-count"></span></h3><div id="discard-tiles" class="inventory-tiles"></div></div>
+    <button id="redraw" class="hand-redraw hidden">手元タイルを引き直す</button>
+   </div>
+   <aside class="side-panel">
+    <section id="editor-panel" class="panel hidden">
+     <h2>局面の編集</h2>
+     <p class="hint">タイルを選び、盤面の候補を押して配置します。配置済みタイルを押すと、ミープルを編集できます。</p>
+     <label>置くタイル<select id="editor-kind"></select></label>
+     <details><summary>配置向きの候補を選ぶ</summary><div id="editor-candidates" class="candidate-list"></div></details>
+     <div class="two-col"><label>手番<select id="editor-player"><option value="0">プレイヤー1</option><option value="1">プレイヤー2</option></select></label><label>手数<input id="editor-turn" type="number" min="1" value="1"></label></div>
+     <div class="two-col"><label>P1 得点<input id="editor-score-0" type="number" min="0" value="0"></label><label>P2 得点<input id="editor-score-1" type="number" min="0" value="0"></label></div>
+     <div class="two-col"><label>P1 手元ミープル<input id="editor-meeples-0" type="number" min="0" max="7" value="7"></label><label>P2 手元ミープル<input id="editor-meeples-1" type="number" min="0" max="7" value="7"></label></div>
+     <label>判断する手元タイル<select id="judgment-kind"></select></label>
+     <p id="editor-selected">配置済みタイルを選ぶと編集できます。</p>
+     <div class="button-row"><button id="remove-editor-tile" disabled>選択タイルを削除</button><button id="begin-judgment" class="primary">この局面で判断を記録</button></div>
+     <p id="editor-validation" class="hint"></p>
+    </section>
+    <section id="decision-panel" class="panel hidden">
+     <div class="panel-title"><h2 id="decision-title"></h2><span id="candidate-progress"></span></div>
+     <p id="decision-summary" class="hint"></p>
+     <details id="helper-panel" class="helper-panel"><summary>候補一覧・ミープル補助</summary>
+      <label>候補を絞り込み<input id="candidate-filter" type="search" placeholder="タイル名・候補番号"></label>
+      <div id="candidate-list" class="candidate-list"></div>
+      <div class="preview-actions"><button id="pattern-cycle">配置パターンを変更</button><button id="meeple-skip">ミープルを置かない</button><span id="meeple-choice"></span></div>
+      <div id="meeple-options" class="meeple-options"></div>
+      <details class="note-helper"><summary>この候補のメモ</summary><textarea id="candidate-note" rows="2" disabled></textarea></details>
+     </details>
+     <div id="annotation" class="annotation">
+      <strong>注目した盤面情報</strong><div id="feature-focus-tags" class="tags"></div>
+      <strong>判断理由</strong><div id="candidate-tags" class="tags"></div>
+     </div>
+     <button id="commit" class="primary" disabled>次の番へ</button>
+    </section>
+    <section id="finish-panel" class="panel hidden"><h2>記録完了</h2><p id="finish-summary"></p><button id="download-finish" class="primary">JSONを書き出す</button></section>
+   </aside>
+  </section>
+ </main>
+ <canvas id="held-tile" aria-hidden="true"></canvas>
+ <script type="module" src="src/turn-recorder.js"></script>
+</body>
+</html>

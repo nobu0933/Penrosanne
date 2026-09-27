@@ -32,21 +32,21 @@ const FORCED_VERTEX_TYPE_HINTS = new Map([
 ]);
 
 // 地形、辺記号、頂点型、絶対禁則をすべて満たす通常候補だけを返す。
-export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false, ignoreMatchingRules = false, candidateFilter = null } = {}) {
+export function placementCandidates(board, rawTile, { targets = board.freeEdges(), tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, allowTerrainHalfTurn = true, allowTerrainMirror = false, ignoreMatchingRules = false, candidateFilter = null, earlyGeometryFilter = null } = {}) {
 	const options = { allowVerticalMatchingPattern, allowTerrainHalfTurn, allowTerrainMirror, ignoreMatchingRules };
 	const candidates = ignoreMatchingRules
-		? terrainOnlyPlacementCandidates(board, rawTile, targets, options)
-		: matchingPlacementCandidates(board, rawTile, targets, options);
+		? terrainOnlyPlacementCandidates(board, rawTile, targets, options, earlyGeometryFilter)
+		: matchingPlacementCandidates(board, rawTile, targets, options, earlyGeometryFilter);
 	const filtered = candidateFilter ? candidates.filter(candidateFilter) : candidates;
 	if (ignoreMatchingRules) return filtered;
 	if (!tileOptions.length && !fillabilityCache) return filtered;
 	return filtered.filter((candidate) => preservesAbsoluteFillability(board, candidate, tileOptions, fillabilityCache));
 }
 
-function terrainOnlyPlacementCandidates(board, rawTile, targets, options) {
+function terrainOnlyPlacementCandidates(board, rawTile, targets, options, earlyGeometryFilter = null) {
 	const results = new Map();
 	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn, options.allowTerrainMirror))
-		for (const candidate of terrainPlacementCandidates(board, terrainTile, targets))
+		for (const candidate of terrainPlacementCandidates(board, terrainTile, targets, earlyGeometryFilter))
 			results.set(placementKey(candidate), candidate);
 	return [...results.values()];
 }
@@ -60,7 +60,7 @@ export function placementCandidateGroups(board, rawTile, options = {}) {
 // 配置位置を増分探索する。返すタイルは仮想タイルであり、ゲーム盤面には追加しない。
 export function structuralPlacementFrontier(
 	board,
-	{ tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, previous = null, changedTile = null, changedTileAlreadyVirtual = false } = {},
+	{ tileOptions = [], fillabilityCache = null, allowVerticalMatchingPattern = true, previous = null, changedTile = null, changedTileAlreadyVirtual = false, vertexTemplates = null } = {},
 ) {
 	const structuralOptions = structuralTileOptions(tileOptions);
 	if (!structuralOptions.length) return emptyPlacementFrontier();
@@ -74,23 +74,58 @@ export function structuralPlacementFrontier(
 	const queuedVertices = new Map();
 	const forced = resume ? structuredClone(previous.forced || []) : [];
 	const forcedKeys = new Set(forced.map(structuralPositionKey));
+	// The macro validator queries this on every newly identified vertex. Keep
+	// it incremental instead of rebuilding an O(board size) set per vertex.
+	const occupiedKeys = vertexTemplates ? new Set(virtual.tiles.map(structuralPositionKey)) : null;
 	const vertexTypes = new Map(resume ? previous.vertexTypes || [] : []);
+	const sealedVertices = new Map(resume ? previous.sealedVertices || [] : []);
 	const searchContext = createStructuralSearchContext(previous?.domainCache);
+	let macroApplications = 0;
+	let skippedSealedVertices = 0;
 	let serial = resume ? previous.nextSerial || forced.length : nextStructuralSerial(virtual.tiles);
 	const enqueueVertex = (point) => queuedVertices.set(vertexKey(point), point);
 	if (!resume) for (const tile of virtual.tiles) for (const point of Object.values(verticesFor(tile, virtual.side))) enqueueVertex(point);
 	if (changedVirtualTile) for (const point of Object.values(verticesFor(changedVirtualTile, virtual.side))) enqueueVertex(point);
 	while (queuedVertices.size) {
 		const [, point] = queuedVertices.entries().next().value;
-		queuedVertices.delete(vertexKey(point));
+		const pointId = vertexKey(point);
+		queuedVertices.delete(pointId);
+		if (sealedVertices.has(pointId)) {
+			if (sealedVertices.get(pointId) === virtual.vertexEntries(point).length) {
+				skippedSealedVertices++;
+				continue;
+			}
+			sealedVertices.delete(pointId);
+		}
 		const types = structuralVertexTypesAt(virtual, point);
-		if (types.length === 1) vertexTypes.set(vertexKey(point), types[0]);
-		else vertexTypes.delete(vertexKey(point));
+		if (types.length === 1) vertexTypes.set(pointId, types[0]);
+		else vertexTypes.delete(pointId);
+		if (vertexTemplates) {
+			const uniqueType = inferVertexTypeAt(virtual, point);
+			const expansion = uniqueType && vertexTemplates[uniqueType]
+				? alignedTemplateExpansion(virtual, point, vertexTemplates[uniqueType], occupiedKeys) : null;
+			if (expansion?.additions.length) {
+				for (const candidate of expansion.additions) {
+					const key = structuralPositionKey(candidate);
+					if (forcedKeys.has(key)) continue;
+					forcedKeys.add(key);
+					occupiedKeys.add(key);
+					const placed = commitVirtualTile(virtual, { ...candidate, _inferenceStatus: 'forced' }, serial++);
+					forced.push({ ...placed, _inferenceStatus: 'forced' });
+					for (const placedPoint of Object.values(verticesFor(placed, virtual.side))) enqueueVertex(placedPoint);
+				}
+				for (const [key, { point: templatePoint, count }] of expansion.vertexCounts)
+					if (virtual.vertexEntries(templatePoint).length === count) sealedVertices.set(key, count);
+				macroApplications++;
+				continue;
+			}
+		}
 		if (!types.length) continue;
 		for (const candidate of forcedVertexCompletionCandidates(virtual, point, types, structuralOptions, searchContext)) {
 			const forcedKey = structuralPositionKey(candidate);
 			if (forcedKeys.has(forcedKey)) continue;
 			forcedKeys.add(forcedKey);
+			occupiedKeys?.add(forcedKey);
 			const placed = commitVirtualTile(virtual, { ...candidate, _inferenceStatus: 'forced' }, serial++);
 			forced.push({ ...placed, _inferenceStatus: 'forced' });
 			for (const placedPoint of Object.values(verticesFor(placed, virtual.side))) enqueueVertex(placedPoint);
@@ -103,6 +138,9 @@ export function structuralPlacementFrontier(
 		virtualTiles: structuredClone(virtual.tiles),
 		virtualFillabilityCache: new Map(),
 		vertexTypes: [...vertexTypes],
+		sealedVertices: vertexTemplates ? [...sealedVertices] : [],
+		macroApplications,
+		skippedSealedVertices,
 		nextSerial: serial,
 		domainCache: searchContext.cache,
 		truncated: false,
@@ -111,13 +149,18 @@ export function structuralPlacementFrontier(
 
 // UI側で枚数や経過時間に応じて中断できるよう、追加がない頂点の検査も
 // 1ステップずつ進める。同期探索の処理順・確定結果は変えない。
-export async function structuralPlacementFrontierProgressively(board, options = {}, { onForced = () => {}, yieldControl = () => {} } = {}) {
+export async function structuralPlacementFrontierProgressively(board, options = {}, { onForced = () => {}, onForcedBatch = null, yieldControl = () => {} } = {}) {
 	const state = createStructuralFrontierState(board, options);
 	if (!state) return emptyPlacementFrontier();
 	let forcedCount = 0;
 	while (!state.done) {
 		const placed = stepStructuralFrontier(state);
-		if (placed) {
+		if (placed?.batch) {
+			forcedCount += placed.batch.length;
+			const batch = placed.batch.map(tile => ({ ...tile, _inferenceStatus: 'forced' }));
+			if (onForcedBatch) onForcedBatch(batch);
+			else batch.forEach(onForced);
+		} else if (placed) {
 			forcedCount++;
 			onForced({ ...placed, _inferenceStatus: 'forced' });
 		}
@@ -127,7 +170,7 @@ export async function structuralPlacementFrontierProgressively(board, options = 
 	return finishStructuralFrontier(state);
 }
 
-function createStructuralFrontierState(board, { tileOptions = [], previous = null, changedTile = null, changedTileAlreadyVirtual = false } = {}) {
+function createStructuralFrontierState(board, { tileOptions = [], previous = null, changedTile = null, changedTileAlreadyVirtual = false, vertexTemplates = null } = {}) {
 	const structuralOptions = structuralTileOptions(tileOptions);
 	if (!structuralOptions.length) return null;
 	const resume = Boolean(previous?.virtualTiles?.length);
@@ -144,6 +187,11 @@ function createStructuralFrontierState(board, { tileOptions = [], previous = nul
 		pendingCandidates: [],
 		forced: resume ? structuredClone(previous.forced || []) : [],
 		forcedKeys: new Set((previous?.forced || []).map(structuralPositionKey)),
+		occupiedKeys: vertexTemplates ? new Set(virtual.tiles.map(structuralPositionKey)) : null,
+		vertexTemplates,
+		sealedVertices: new Map(resume ? previous.sealedVertices || [] : []),
+		macroApplications: 0,
+		skippedSealedVertices: 0,
 		vertexTypes: new Map(resume ? previous.vertexTypes || [] : []),
 		searchContext: createStructuralSearchContext(previous?.domainCache),
 		serial: resume ? previous.nextSerial || (previous?.forced || []).length : nextStructuralSerial(virtual.tiles),
@@ -162,6 +210,7 @@ function stepStructuralFrontier(state) {
 			const forcedKey = structuralPositionKey(candidate);
 			if (state.forcedKeys.has(forcedKey)) continue;
 			state.forcedKeys.add(forcedKey);
+			state.occupiedKeys?.add(forcedKey);
 			const placed = commitVirtualTile(state.virtual, { ...candidate, _inferenceStatus: 'forced' }, state.serial++);
 			state.forced.push({ ...placed, _inferenceStatus: 'forced' });
 			for (const point of Object.values(verticesFor(placed, state.virtual.side))) state.queuedVertices.set(vertexKey(point), point);
@@ -172,10 +221,40 @@ function stepStructuralFrontier(state) {
 			return null;
 		}
 		const [, point] = state.queuedVertices.entries().next().value;
-		state.queuedVertices.delete(vertexKey(point));
+		const pointId = vertexKey(point);
+		state.queuedVertices.delete(pointId);
+		if (state.vertexTemplates && state.sealedVertices.has(pointId)) {
+			if (state.sealedVertices.get(pointId) === state.virtual.vertexEntries(point).length) {
+				state.skippedSealedVertices++;
+				return null;
+			}
+			state.sealedVertices.delete(pointId);
+		}
 		const types = structuralVertexTypesAt(state.virtual, point);
-		if (types.length === 1) state.vertexTypes.set(vertexKey(point), types[0]);
-		else state.vertexTypes.delete(vertexKey(point));
+		if (types.length === 1) state.vertexTypes.set(pointId, types[0]);
+		else state.vertexTypes.delete(pointId);
+		if (state.vertexTemplates) {
+			const uniqueType = inferVertexTypeAt(state.virtual, point);
+			const expansion = uniqueType && state.vertexTemplates[uniqueType]
+				? alignedTemplateExpansion(state.virtual, point, state.vertexTemplates[uniqueType], state.occupiedKeys) : null;
+			if (expansion?.additions.length) {
+				const batch = [];
+				for (const candidate of expansion.additions) {
+					const key = structuralPositionKey(candidate);
+					if (state.forcedKeys.has(key)) continue;
+					state.forcedKeys.add(key);
+					state.occupiedKeys.add(key);
+					const placed = commitVirtualTile(state.virtual, { ...candidate, _inferenceStatus: 'forced' }, state.serial++);
+					state.forced.push({ ...placed, _inferenceStatus: 'forced' });
+					batch.push(placed);
+					for (const placedPoint of Object.values(verticesFor(placed, state.virtual.side))) state.queuedVertices.set(vertexKey(placedPoint), placedPoint);
+				}
+				for (const [key, { point: templatePoint, count }] of expansion.vertexCounts)
+					if (state.virtual.vertexEntries(templatePoint).length === count) state.sealedVertices.set(key, count);
+				state.macroApplications++;
+				return { batch };
+			}
+		}
 		if (types.length) state.pendingCandidates = forcedVertexCompletionCandidates(state.virtual, point, types, state.structuralOptions, state.searchContext);
 		return null;
 	}
@@ -190,6 +269,9 @@ function finishStructuralFrontier(state) {
 		virtualTiles: structuredClone(state.virtual.tiles),
 		virtualFillabilityCache: new Map(),
 		vertexTypes: [...state.vertexTypes],
+		sealedVertices: state.vertexTemplates ? [...state.sealedVertices] : [],
+		macroApplications: state.macroApplications,
+		skippedSealedVertices: state.skippedSealedVertices,
 		nextSerial: state.serial,
 		domainCache: state.searchContext.cache,
 		truncated: false,
@@ -236,6 +318,48 @@ function structuralTileOptions(tileOptions) {
 		matchingPattern: null,
 		isStructural: true,
 	}));
+}
+
+// Opt-in macro: rotate/translate the closure of one completed vertex
+// onto a uniquely identified vertex in the actual board. Reject any alignment
+// that conflicts with already placed tiles, then let the ordinary search handle
+// that vertex instead. The default search path never uses this macro.
+function alignedTemplateExpansion(board, point, template, occupied) {
+	if (template.side !== board.side) return null;
+	const around = board.vertexEntries(point);
+	if (!around.length) return null;
+	for (const actual of around) for (let anchor = 0; anchor < template.seedCount; anchor++) {
+		if (template.seedVertexIds[anchor] !== actual.vertexId) continue;
+		const delta = (actual.tile.rotation || 0) - (template.tiles[anchor].rotation || 0);
+		const cosine = Math.cos(delta), sine = Math.sin(delta);
+		const transformed = template.tiles.map(tile => ({ ...tile,
+			centerX: point.x + tile.centerX * cosine - tile.centerY * sine,
+			centerY: point.y + tile.centerX * sine + tile.centerY * cosine,
+			rotation: (tile.rotation || 0) + delta,
+		}));
+		const seedKeys = new Set(transformed.slice(0, template.seedCount).map(structuralPositionKey));
+		if (around.some(({ tile }) => !seedKeys.has(structuralPositionKey(tile)))) continue;
+		const preview = new Board(board.side);
+		preview.tiles = [...board.tiles];
+		const additions = [];
+		let valid = true;
+		for (const tile of transformed) {
+			if (occupied.has(structuralPositionKey(tile))) continue;
+			if (preview.overlaps(tile) || !vertexPatternsAllow(preview, tile)) { valid = false; break; }
+			preview.add(tile);
+			additions.push(tile);
+		}
+		if (!valid) continue;
+		const vertexCounts = new Map();
+		for (const tile of transformed) for (const vertex of Object.values(verticesFor(tile, board.side))) {
+			const key = vertexKey(vertex);
+			const entry = vertexCounts.get(key) || { point: vertex, count: 0 };
+			entry.count++;
+			vertexCounts.set(key, entry);
+		}
+		return { additions, vertexCounts };
+	}
+	return null;
 }
 
 // 頂点型探索の優先順位。識別列は頂点列全体との完全一致ではなく、時計回りの
@@ -369,10 +493,10 @@ function commitVirtualTile(board, candidate, serial) {
 	board.add(tile);
 	return board.getTile(tile.id);
 }
-function matchingPlacementCandidates(board, rawTile, targets, options) {
+function matchingPlacementCandidates(board, rawTile, targets, options, earlyGeometryFilter = null) {
 	const results = new Map();
 	for (const terrainTile of terrainPatternVariants(rawTile, options.allowTerrainHalfTurn, options.allowTerrainMirror))
-		for (const base of terrainPlacementCandidates(board, terrainTile, targets)) {
+		for (const base of terrainPlacementCandidates(board, terrainTile, targets, earlyGeometryFilter)) {
 			const candidate = resolveMatchingPatterns(board, base, options);
 			if (candidate) results.set(placementKey(candidate), candidate);
 		}
@@ -398,11 +522,11 @@ function terrainPatternVariants(rawTile, allowTerrainHalfTurn, allowTerrainMirro
 	return allowTerrainMirror ? [...rotations, ...rotations.map((tile) => mirrorTile(tile))] : rotations;
 }
 
-function terrainPlacementCandidates(board, rawTile, targets) {
-	return geometricPlacementCandidates(board, rawTile, targets, { requireTerrain: true });
+function terrainPlacementCandidates(board, rawTile, targets, earlyGeometryFilter = null) {
+	return geometricPlacementCandidates(board, rawTile, targets, { requireTerrain: true, earlyGeometryFilter });
 }
 
-function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain }) {
+function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain, earlyGeometryFilter = null }) {
 	const results = new Map();
 	for (const { edge: targetEdge } of targets) for (const sourceEdge of edgesFor({ ...rawTile, centerX: 0, centerY: 0, rotation: 0 }, board.side)) {
 		if (requireTerrain && sourceEdge.terrain !== targetEdge.terrain) continue;
@@ -412,6 +536,7 @@ function geometricPlacementCandidates(board, rawTile, targets, { requireTerrain 
 		const midpoint = { x: (targetEdge.a.x + targetEdge.b.x) / 2, y: (targetEdge.a.y + targetEdge.b.y) / 2 };
 		const localMid = rotate({ x: (local[sourceA].x + local[sourceB].x) / 2, y: (local[sourceA].y + local[sourceB].y) / 2 });
 		const base = { ...rawTile, centerX: midpoint.x - localMid.x, centerY: midpoint.y - localMid.y, rotation };
+		if (earlyGeometryFilter && !earlyGeometryFilter(base)) continue;
 		if (board.overlaps(base) || !hasAdjacentEdge(board, base) || (requireTerrain && !allSharedTerrainMatch(board, base))) continue;
 		results.set(placementKey(base), base);
 	}

@@ -7,14 +7,16 @@ import { verticesFor } from "./Tile.js";
 import { createPlayer } from "./Player.js";
 import { handTileId, candidatesForHandTile } from './HandCandidates.js';
 import { createFixedTrainingLayout } from './FixedTrainingLayout.js';
+import { cachedVertexExpansionTemplates } from './TrainingVertexTemplates.js';
 
 import { beginHistoryTurn, captureHistoryMeeples, completeHistoryTurn } from "./TurnHistory.js";
 
 export class GameEngine {
-  constructor({ playerCount=2, playerNames=[], meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single', trainingPattern=null }={}) {
+  constructor({ playerCount=2, playerNames=[], meeples=7, side=120, random=Math.random, fieldScoring=true, deckType="standard", rules={}, titles={}, deferCandidateSearch=false, handMode='single', trainingPattern=null, trainingFastFrontier=false }={}) {
     if (trainingPattern && handMode !== 'single') throw new Error('固定訓練盤面は1枚手札の自己対戦専用です。');
     this.random=random;
     this.trainingPattern=trainingPattern;
+    this.trainingFastFrontier=Boolean(trainingFastFrontier);
     this.fixedTrainingLayout=null;
     this.deckType=deckType;
     this.rules={allowVerticalMatchingPattern:rules.allowVerticalMatchingPattern ?? true,allowTerrainHalfTurn:rules.allowTerrainHalfTurn ?? true,allowTerrainMirror:rules.allowTerrainMirror ?? false,ignoreMatchingRules:rules.ignoreMatchingRules ?? false};
@@ -45,6 +47,44 @@ export class GameEngine {
   }
   get activePlayer() { return this.state.players[this.state.turn]; }
   get privatePlanning() { return this.state.handMode==='private-city-planning'; }
+  // Search must never inherit the actual deck order or mutate the live board.
+  // The caller supplies a freshly sampled deck from public tile counts.
+  forkForSearch({ deck, random = Math.random, profile = null, candidateCache = null } = {}) {
+    if (!Array.isArray(deck)) throw new Error('探索用の山札を指定してください。');
+    const fork=Object.create(GameEngine.prototype);
+    fork.random=random;
+    fork.trainingPattern=this.trainingPattern;
+    fork.trainingFastFrontier=this.trainingFastFrontier;
+    fork.fixedTrainingLayout=this.fixedTrainingLayout;
+    fork.deckType=this.deckType;
+    fork.rules={...this.rules};
+    fork.titleRules={...this.titleRules};
+    fork.deferCandidateSearch=false;
+    fork._searchProfile=profile;
+    fork._searchCandidateCache=candidateCache;
+    fork.tileOptions=this.tileOptions;
+    fork.fieldScoring=this.fieldScoring;
+    // Historical UI logs cannot affect future legality or scoring and grow
+    // linearly with the match. Do not copy them for every simulation.
+    const {board,deck:actualDeck,turnHistory,events,scoreEvents,vertexCompletionEvents,pendingHistoryTurn,...rest}=this.state;
+    fork.state=structuredClone(rest);
+    fork.state.deck=structuredClone(deck);
+    fork.state.turnHistory=[];
+    fork.state.events=[];
+    fork.state.scoreEvents=[];
+    fork.state.vertexCompletionEvents=[];
+    fork.state.pendingHistoryTurn=null;
+    fork.state.board=new Board(board.side);
+    for(const tile of board.tiles) fork.state.board.add(tile);
+    fork.fillabilityCache=new Map(this.fillabilityCache);
+    fork._candidateGroups=this._candidateGroups ? structuredClone(this._candidateGroups) : null;
+    fork._handCandidateCache=new Map();
+    fork._structuralFrontier=this._structuralFrontier ? structuredClone(this._structuralFrontier) : null;
+    fork._previousStructuralFrontier=this._previousStructuralFrontier ? structuredClone(this._previousStructuralFrontier) : null;
+    fork._structuralChangedTile=this._structuralChangedTile ? structuredClone(this._structuralChangedTile) : null;
+    fork._changedTileAlreadyVirtual=this._changedTileAlreadyVirtual;
+    return fork;
+  }
   handForPlayer(playerId=this.activePlayer.id) { return this.state.hands[playerId] || []; }
   drawIntoHand(playerId) {
     const tile=this.state.deck.pop();
@@ -85,6 +125,7 @@ export class GameEngine {
       previous:this._previousStructuralFrontier,
       changedTile:this._structuralChangedTile,
       changedTileAlreadyVirtual:this._changedTileAlreadyVirtual,
+      vertexTemplates:this.trainingFastFrontier?cachedVertexExpansionTemplates(this.state.board.side):null,
     });
     this._previousStructuralFrontier=null;
     this._structuralChangedTile=null;
@@ -92,7 +133,7 @@ export class GameEngine {
     return this._structuralFrontier=frontier;
   }
   structuralCandidates() { return this.structuralFrontier().forced; }
-  async structuralFrontierProgressively({ onForced, yieldControl } = {}) {
+  async structuralFrontierProgressively({ onForced, onForcedBatch, yieldControl } = {}) {
     if (this.rules.ignoreMatchingRules || this.fixedTrainingLayout) return this._structuralFrontier = { forced:[], unresolved:[], all:[], domainCache:new Map(), truncated:false };
     if (this._structuralFrontier) return this._structuralFrontier;
     const frontier = await structuralPlacementFrontierProgressively(this.state.board, {
@@ -102,7 +143,8 @@ export class GameEngine {
       previous:this._previousStructuralFrontier,
       changedTile:this._structuralChangedTile,
       changedTileAlreadyVirtual:this._changedTileAlreadyVirtual,
-    }, { onForced, yieldControl });
+      vertexTemplates:this.trainingFastFrontier?cachedVertexExpansionTemplates(this.state.board.side):null,
+    }, { onForced, onForcedBatch, yieldControl });
     this._previousStructuralFrontier=null;
     this._structuralChangedTile=null;
     this._changedTileAlreadyVirtual=false;
@@ -116,25 +158,46 @@ export class GameEngine {
     // パターンを必ず再評価する。
 	if (resetUnplacedPlacementPatterns(this.state.currentTile, this.rules.allowVerticalMatchingPattern, this.rules.allowTerrainHalfTurn)) this._candidateGroups=null;
     if(this._candidateGroups) return this._candidateGroups;
+	// Search-only reuse is keyed by the complete placed tiles and the current
+	// physical tile. A previous turn's candidates are invalid after any change.
+	const searchKey=this._searchCandidateCache?JSON.stringify([this.state.board.tiles,this.state.currentTile]):null;
+	if(searchKey && this._searchCandidateCache.has(searchKey)) {
+		const cached=this._searchCandidateCache.get(searchKey);
+		this._candidateGroups=structuredClone(cached.groups);
+		this._structuralFrontier=cached.frontier?structuredClone(cached.frontier):null;
+		this._previousStructuralFrontier=null;
+		this._structuralChangedTile=null;
+		if(this._searchProfile)this._searchProfile.candidateCacheHits=(this._searchProfile.candidateCacheHits||0)+1;
+		return this._candidateGroups;
+	}
+	if(searchKey && this._searchProfile)this._searchProfile.candidateCacheMisses=(this._searchProfile.candidateCacheMisses||0)+1;
+	const remember=(groups)=>{
+		if(searchKey && !this._structuralFrontier?.truncated){
+			if(this._searchCandidateCache.size>=256)this._searchCandidateCache.clear();
+			this._searchCandidateCache.set(searchKey,{groups:structuredClone(groups),frontier:this._structuralFrontier?structuredClone(this._structuralFrontier):null});
+		}
+		return groups;
+	};
 	if (this.fixedTrainingLayout) {
-		const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,...this.rules,candidateFilter:this.fixedTrainingLayout.allows});
-		return this._candidateGroups={regular,forced:[],unresolved:[]};
+		const targets=this.fixedTrainingLayout.targetsFor(this.state.board.freeEdges(),this.state.currentTile.shape);
+		const regular=placementCandidates(this.state.board,this.state.currentTile,{targets,tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,...this.rules,candidateFilter:this.fixedTrainingLayout.allows,earlyGeometryFilter:this.fixedTrainingLayout.allows});
+		return remember(this._candidateGroups={regular,forced:[],unresolved:[]});
 	}
 	if (this.rules.ignoreMatchingRules) {
 		const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,allowTerrainMirror:this.rules.allowTerrainMirror,ignoreMatchingRules:true});
-		return this._candidateGroups={regular,forced:[],unresolved:[]};
+		return remember(this._candidateGroups={regular,forced:[],unresolved:[]});
 	}
     const frontier=this.structuralFrontier(), forced=frontier.forced;
 	const regular=placementCandidates(this.state.board,this.state.currentTile,{tileOptions:this.tileOptions,fillabilityCache:this.fillabilityCache,allowVerticalMatchingPattern:this.rules.allowVerticalMatchingPattern,allowTerrainHalfTurn:this.rules.allowTerrainHalfTurn,allowTerrainMirror:this.rules.allowTerrainMirror})
       .filter((candidate)=>!conflictsWithForcedPlacement(candidate, forced, this.state.board.side));
-    return this._candidateGroups={regular,forced,unresolved:frontier.unresolved};
+    return remember(this._candidateGroups={regular,forced,unresolved:frontier.unresolved});
   }
   candidates() { return this.candidateGroups().regular; }
-  async candidateGroupsProgressively({ onForced, yieldControl } = {}) {
+  async candidateGroupsProgressively({ onForced, onForcedBatch, yieldControl } = {}) {
     if (this.privatePlanning) {
       let forcedCount=0;
       while (this.state.phase==='placeTile') {
-        const frontier=await this.structuralFrontierProgressively({onForced:tile=>{forcedCount++;onForced?.(tile);},yieldControl});
+        const frontier=await this.structuralFrontierProgressively({onForced:tile=>{forcedCount++;onForced?.(tile);},onForcedBatch:batch=>{forcedCount+=batch.length;if(onForcedBatch)onForcedBatch(batch);else batch.forEach(tile=>onForced?.(tile));},yieldControl});
         if (!this._candidateGroups) {
           const regular=[];
           for (const tile of this.handForPlayer()) {
@@ -157,7 +220,7 @@ export class GameEngine {
         this.state.discarded.push(this.state.currentTile); this.state.currentTile=null; this._candidateGroups=null; this.nextTurn();
         continue;
       }
-      const frontier = await this.structuralFrontierProgressively({ onForced, yieldControl });
+      const frontier = await this.structuralFrontierProgressively({ onForced, onForcedBatch, yieldControl });
       if (this.rules.ignoreMatchingRules) {
 		const groups=this.candidateGroups();
 		if (groups.regular.length) return groups;
@@ -284,7 +347,21 @@ export class GameEngine {
       if (!this.deferCandidateSearch) while(this.state.phase==='placeTile' && !this.state.deck.length && !this.candidates().length) this.passTurn();
       return;
     }
-    while(this.state.deck.length){this.state.currentTile=this.state.deck.pop();resetUnplacedPlacementPatterns(this.state.currentTile,this.rules.allowVerticalMatchingPattern,this.rules.allowTerrainHalfTurn);this.state.phase="placeTile";this._candidateGroups=null;if(this.deferCandidateSearch)return;if(this.candidates().length)return;this.state.discarded.push(this.state.currentTile);this.state.currentTile=null;this._candidateGroups=null;}
+    while (this.state.deck.length) {
+      this.state.currentTile = this.state.deck.pop();
+      resetUnplacedPlacementPatterns(this.state.currentTile,this.rules.allowVerticalMatchingPattern,this.rules.allowTerrainHalfTurn);
+      this.state.phase = 'placeTile';
+      this._candidateGroups = null;
+      if (this.deferCandidateSearch) return;
+      const started = this._searchProfile ? performance.now() : 0;
+      const legal = this.candidates();
+      if (this._searchProfile) this._searchProfile.nextCandidateMs =
+        (this._searchProfile.nextCandidateMs || 0) + performance.now() - started;
+      if (legal.length) return;
+      this.state.discarded.push(this.state.currentTile);
+      this.state.currentTile = null;
+      this._candidateGroups = null;
+    }
     this.finishGame();
   }
   beginHandTurn() {

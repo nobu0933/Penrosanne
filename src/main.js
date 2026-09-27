@@ -11,7 +11,9 @@ import { markerForFeature } from './ui/FeatureAnchors.js';
 import { MEEPLE_ASSET_COUNT, meepleAssetForPlayer, meepleKindForFeature, playerColor, selectedMeepleColor, setPlayerMeepleColors } from './ui/MeepleAssets.js';
 import { DECK_CONFIGS, createPrototypeDeck } from './game/TileSet.js';
 import { chooseCpuAction } from './ai/CpuPlayer.js';
-import { MATCH_CPU_A123 } from './ai/MatchCpuDefaults.js';
+import { chooseMctsAction } from './ai/MctsCpu.js';
+import { championOf, parseMctsPopulation } from './ai/MctsPopulation.js';
+import { MATCH_CPU_WEIGHTS } from './ai/MatchCpuDefaults.js';
 import { createCpuObservation } from './ai/CpuObservation.js';
 import { normalizeCpuPolicy, phaseForProgress } from './ai/TrainingEvolution.js';
 import { seededRandom } from './ai/SeededRandom.js';
@@ -79,6 +81,7 @@ let candidates = [],
 	progressiveForcedCandidates = [],
 	structuralSearchToken = 0,
 	progressiveDisplayQueue = [],
+	progressiveDisplayKeys = new Set(),
 	progressiveDisplayTimer = null,
 	progressiveSearchResult = null,
 	progressiveSearchCompleted = false,
@@ -123,6 +126,10 @@ const el = {
 	terrainPatternMode: document.querySelector('#terrain-pattern-mode-select'),
 	terrainMirrorMode: document.querySelector('#terrain-mirror-mode-select'),
 	progressiveFrontier: document.querySelector('#progressive-frontier-toggle'),
+	frontierMode: document.querySelector('#frontier-mode-select'),
+	cpuMode: document.querySelector('#cpu-mode-select'),
+	cpuMctsFile: document.querySelector('#cpu-mcts-file'),
+	cpuMctsStatus: document.querySelector('#cpu-mcts-status'),
 	startDeck: document.querySelector('#start-deck'),
 	playerCount: document.querySelector('#player-count-select'),
 	player1Color: document.querySelector('#player1-color'),
@@ -159,7 +166,8 @@ const ruleControls = [
 ];
 let selectedRulePreset = 'standard';
 let cpuPlayers = [false, false, false, false], cpuCatalog = null;
-const cpuWeights = normalizeCpuPolicy(MATCH_CPU_A123);
+let cpuMctsPopulation = null;
+const cpuWeights = normalizeCpuPolicy(MATCH_CPU_WEIGHTS);
 let manualLogDecisions = [], pendingManualDecision = null;
 let cpuTurnGeneration = 0, cpuTurnRunning = false, cpuTurnTimer = null, resolveCpuPause = null;
 let pendingCpuMeeple = null;
@@ -328,10 +336,20 @@ async function runCpuTurn(generation, playingEngine) {
 		const totalTiles = playingEngine.state.board.tiles.length + playingEngine.state.deck.length + playingEngine.state.discarded.length + handCount + Number(Boolean(playingEngine.state.currentTile));
 		const weights = cpuWeights.phaseWeights[phaseForProgress(playingEngine.state.board.tiles.length / Math.max(1, totalTiles))];
 		const observation = createCpuObservation(playingEngine, legal, cpuCatalog);
-		const decision = chooseCpuAction(observation, {
-			weights,
-			tacticalLimit: playingEngine.state.players.length === 2 && !playingEngine.privatePlanning ? 3 : 0,
-		});
+		const mctsEnabled = el.cpuMode.value === 'mcts' && cpuMctsPopulation
+			&& playingEngine.state.players.length === 2 && !playingEngine.privatePlanning;
+		const important = playingEngine.state.deck.length <= 12
+			&& Math.abs(playingEngine.state.players[0].score - playingEngine.state.players[1].score) <= 15;
+		const decision = mctsEnabled
+			? await chooseMctsAction(playingEngine, { catalog: cpuCatalog,
+				parameters: championOf(cpuMctsPopulation).parameters,
+				timeBudgetMs: important ? 5000 : 1000,
+				isCancelled: () => !cpuTurnIsCurrent(generation, playingEngine),
+				rootCandidates: legal })
+			: chooseCpuAction(observation, {
+				weights,
+				tacticalLimit: playingEngine.state.players.length === 2 && !playingEngine.privatePlanning ? 3 : 0,
+			});
 		if (!cpuTurnIsCurrent(generation, playingEngine)) return;
 		animateCandidatePreview(decision.placement);
 		if (!await cpuPause(190) || !cpuTurnIsCurrent(generation, playingEngine)) return;
@@ -575,6 +593,7 @@ function resetProgressiveDisplay({ preserveVisible = false } = {}) {
 	if (progressiveDisplayTimer !== null) clearTimeout(progressiveDisplayTimer);
 	progressiveDisplayTimer = null;
 	progressiveDisplayQueue = [];
+	progressiveDisplayKeys = new Set(preserveVisible ? progressiveForcedCandidates.map(structuralPositionKey) : []);
 	progressiveSearchResult = null;
 	progressiveSearchCompleted = false;
 	progressiveBaselineForcedKeys = new Set();
@@ -583,18 +602,27 @@ function resetProgressiveDisplay({ preserveVisible = false } = {}) {
 	if (!preserveVisible) progressiveForcedCandidates = [];
 }
 function progressiveForcedHas(tile) {
-	const key = structuralPositionKey(tile);
-	return progressiveForcedCandidates.some((entry) => structuralPositionKey(entry) === key)
-		|| progressiveDisplayQueue.some((entry) => structuralPositionKey(entry) === key);
+	return progressiveDisplayKeys.has(structuralPositionKey(tile));
 }
 function removeProgressiveForcedCandidate(tile) {
 	const key = structuralPositionKey(tile);
 	progressiveForcedCandidates = progressiveForcedCandidates.filter((entry) => structuralPositionKey(entry) !== key);
-	progressiveDisplayQueue = progressiveDisplayQueue.filter((entry) => structuralPositionKey(entry) !== key);
+	progressiveDisplayQueue = progressiveDisplayQueue.map(batch => batch.filter(entry => structuralPositionKey(entry) !== key)).filter(batch => batch.length);
+	progressiveDisplayKeys.delete(key);
 }
 function queueProgressiveForced(tile, token) {
-	if (token !== structuralSearchToken || !progressiveAnimationEnabled || progressiveForcedHas(tile)) return;
-	progressiveDisplayQueue.push(tile);
+	queueProgressiveForcedBatch([tile], token);
+}
+function queueProgressiveForcedBatch(tiles, token) {
+	if (token !== structuralSearchToken || !progressiveAnimationEnabled) return;
+	const batch = tiles.filter(tile => {
+		const key = structuralPositionKey(tile);
+		if (progressiveDisplayKeys.has(key)) return false;
+		progressiveDisplayKeys.add(key);
+		return true;
+	});
+	if (!batch.length) return;
+	progressiveDisplayQueue.push(batch);
 	if (progressiveDisplayTimer === null && progressiveForcedCandidates.length === 0) revealNextProgressiveForced(token, true);
 	else if (progressiveDisplayTimer === null) revealNextProgressiveForced(token);
 }
@@ -604,7 +632,7 @@ function revealNextProgressiveForced(token, immediately = false) {
 		if (token !== structuralSearchToken) return;
 		let added = 0;
 		while (added < progressiveDisplayBatchSize && progressiveDisplayQueue.length) {
-			progressiveForcedCandidates.push(progressiveDisplayQueue.shift());
+			progressiveForcedCandidates.push(...progressiveDisplayQueue.shift());
 			added++;
 		}
 		if (added) render();
@@ -618,6 +646,7 @@ function finishProgressiveDisplay(token) {
 	if (token !== structuralSearchToken || !progressiveSearchCompleted || !progressiveSearchResult || progressiveDisplayQueue.length || progressiveDisplayTimer !== null) return;
 	// コールバックを通らないキャッシュ済みの探索結果も、最後には完全な集合へそろえる。
 	progressiveForcedCandidates = progressiveSearchResult.forced;
+	progressiveDisplayKeys = new Set(progressiveForcedCandidates.map(structuralPositionKey));
 	candidates = displayCandidateTiles(progressiveSearchResult.regular);
 	structuralSearchPending = false;
 	progressiveSearchResult = null;
@@ -657,6 +686,7 @@ async function resolveCandidatesProgressively(token) {
 		});
 		const groups = await searchingEngine.candidateGroupsProgressively({
 			onForced: tile => queueProgressiveForced(tile, token),
+			onForcedBatch: batch => queueProgressiveForcedBatch(batch, token),
 			yieldControl: progress => {
 				if (token !== structuralSearchToken) throw new Error('Search superseded');
 				return checkpoint(progress);
@@ -667,7 +697,7 @@ async function resolveCandidatesProgressively(token) {
 		const addedCount = groups.forced.filter((tile) => !progressiveBaselineForcedKeys.has(structuralPositionKey(tile))).length;
 		structuralSearchProgressCount = addedCount;
 		updateSearchStatus();
-		const pacing = progressiveDisplayPacing(addedCount);
+		const pacing = progressiveDisplayPacing(searchingEngine.trainingFastFrontier ? progressiveDisplayQueue.length : addedCount);
 		progressiveDisplayIntervalMs = pacing.intervalMs;
 		progressiveDisplayBatchSize = pacing.batchSize;
 		// キャッシュ命中時は onForced が呼ばれないので、未表示分をここでキューへ補う。
@@ -1308,7 +1338,7 @@ function startSelectedDeck() {
 	const titles = Object.fromEntries([...titleRuleSettings].map(([id, toggle]) => [id, toggle.checked]));
 	gameSeed = randomGameSeed();
 	manualLogDecisions = []; pendingManualDecision = null;
-	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, playerNames: configuredPlayerNames(), side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value, random: seededRandom(gameSeed) });
+	engine = new GameEngine({ playerCount: Number(el.playerCount.value) || 2, playerNames: configuredPlayerNames(), side, fieldScoring, deckType: el.deck.value, rules: gameRules, titles, deferCandidateSearch: true, handMode: el.handMode.value, trainingFastFrontier: el.frontierMode.value === 'template', random: seededRandom(gameSeed) });
 	syncCpuPlayers();
 	cpuCatalog = createPrototypeDeck(() => 0, el.deck.value);
 	resetScorePresentation();
@@ -1464,8 +1494,28 @@ window.addEventListener('penrosanne-language-change', () => {
 	renderDeckOptions();
 	renderMeepleColorOptions();
 	updateSetupStatus();
+	updateCpuMctsStatus();
 	render();
 });
+function updateCpuMctsStatus(error = '') {
+	if (error) { el.cpuMctsStatus.textContent = error; return; }
+	if (cpuMctsPopulation) {
+		const champion = championOf(cpuMctsPopulation);
+		el.cpuMctsStatus.textContent = t('mcts.cpuLoaded', { generation: cpuMctsPopulation.generation, individual: champion.id });
+	} else el.cpuMctsStatus.textContent = t('mcts.cpuFileHelp');
+}
+el.cpuMctsFile.onchange = async () => {
+	try {
+		const file = el.cpuMctsFile.files?.[0];
+		if (!file) return;
+		cpuMctsPopulation = parseMctsPopulation(JSON.parse(await file.text()));
+		updateCpuMctsStatus();
+	} catch (error) {
+		cpuMctsPopulation = null;
+		el.cpuMctsFile.value = '';
+		updateCpuMctsStatus(error.message);
+	}
+};
 el.theme.onchange = (event) => tileTheme.setTheme(event.target.value);
 el.progressiveFrontier.onchange = () => {
 	// 実行中の探索は中断せず、切替後のモードは次の候補探索から適用する。
@@ -1473,7 +1523,20 @@ el.progressiveFrontier.onchange = () => {
 	refreshCandidates();
 	render();
 };
+el.frontierMode.onchange = () => {
+	// Preserve the already solved frontier; the next placement uses the chosen
+	// search mode. An in-flight search keeps its original mode until it ends.
+	engine.trainingFastFrontier = el.frontierMode.value === 'template';
+};
 el.startDeck.onclick = async () => {
+	if (el.cpuMode.value === 'mcts' && !cpuMctsPopulation) {
+		updateCpuMctsStatus(t('mcts.cpuRequired'));
+		return;
+	}
+	if (el.cpuMode.value === 'mcts' && (Number(el.playerCount.value) !== 2 || el.handMode.value !== 'single')) {
+		updateCpuMctsStatus(t('mcts.cpuUnsupported'));
+		return;
+	}
 	if (!await confirmDuplicateColors()) return;
 	startSelectedDeck();
 };

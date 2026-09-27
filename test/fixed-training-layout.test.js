@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GameEngine } from '../src/game/GameEngine.js';
 import { createFixedTrainingLayout } from '../src/game/FixedTrainingLayout.js';
+import { placementCandidates } from '../src/game/Rules.js';
 import { seededRandom } from '../src/ai/SeededRandom.js';
 import { fileURLToPath } from 'node:url';
 import { loadTrainingPatterns } from '../scripts/training-patterns.mjs';
@@ -49,5 +50,23 @@ test('保存済みの3パターンは実際の標準対局の合法候補を生�
 		assert.ok(game.candidates().length > 0);
 		assert.ok(game.candidates().every(candidate => game.fixedTrainingLayout.allows(candidate)));
 		assert.equal(game.structuralCandidates().length, 0);
+	}
+});
+
+test('固定盤面の近傍辺・早期形状フィルターは従来の全辺探索と候補が完全一致する', () => {
+	const directory = fileURLToPath(new URL('../training-patterns/standard-training-v1/', import.meta.url));
+	for (const pattern of loadTrainingPatterns(directory)) {
+		const game = new GameEngine({ deckType: 'standard', trainingPattern: pattern,
+			rules: { allowVerticalMatchingPattern: true, allowTerrainHalfTurn: true, allowTerrainMirror: true },
+			random: seededRandom(17) });
+		for (let turn = 0; turn < 4; turn++) {
+			const baseline = placementCandidates(game.state.board, game.state.currentTile, {
+				tileOptions: game.tileOptions, fillabilityCache: game.fillabilityCache,
+				...game.rules, candidateFilter: game.fixedTrainingLayout.allows,
+			});
+			assert.deepEqual(game.candidates(), baseline);
+			game.placeTile(baseline[turn % baseline.length]);
+			if (game.state.phase === 'placeMeeple') game.skipMeeple();
+		}
 	}
 });

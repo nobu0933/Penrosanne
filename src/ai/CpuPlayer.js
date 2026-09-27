@@ -36,10 +36,60 @@ function componentOwners(board, state, component, type, addedMeeple = null) {
 	return owners;
 }
 
-function ownershipDifference(owners, selfId, opponentId) {
-	const self = owners.get(selfId) || 0, opponent = owners.get(opponentId) || 0;
-	if (!self && !opponent) return 0;
-	return Math.sign(self - opponent);
+function fieldAwardDifference(board, state, component, addedMeeple, selfId, opponentId) {
+	const owners = componentOwners(board, state, component, 'field', addedMeeple);
+	const feature = component.features[0];
+	const points = scoreField(board, feature.tile, feature.index);
+	return points * scoreShareDifference(owners, selfId, opponentId);
+}
+
+// 配置で影響する草原だけを、現在完成している都市の得点を使って終局時点として採点する。
+// 連結後の最多ミープル（同数なら双方）に実際の草原採点規則どおり得点を配分する。
+function fieldScoreDifferenceDelta(board, preview, state, candidate, addedMeeple, selfId, opponentId) {
+	const before = new Map(), after = new Map();
+	const addAffectedField = (tile, index) => {
+		const merged = preview.fieldScoreComponent(tile, index);
+		after.set(merged.key, merged);
+		for (const feature of merged.features) {
+			if (feature.tile.id === candidate.id) continue;
+			const prior = board.fieldScoreComponent(feature.tile, feature.index);
+			before.set(prior.key, prior);
+		}
+	};
+	for (let index = 0; index < (candidate.featureGroups.field?.length || 0); index++) {
+		addAffectedField(candidate, index);
+	}
+	// 都市を完成させたタイルは、その都市に隣接する既存草原の終局見込みも変える。
+	const newlyCompletedCities = new Set();
+	for (let index = 0; index < (candidate.featureGroups.city?.length || 0); index++) {
+		if (isComplete(preview, candidate, 'city', index) && !isComplete(board, candidate, 'city', index))
+			newlyCompletedCities.add(preview.component(candidate, 'city', index).key);
+	}
+	if (newlyCompletedCities.size) for (const tile of preview.tiles) {
+		for (let index = 0; index < (tile.featureGroups.field?.length || 0); index++) {
+			const adjacentCities = tile.fieldScoreCityAdjacency?.[index] ?? tile.fieldCityAdjacency?.[index] ?? [];
+			if (adjacentCities.some(cityIndex => newlyCompletedCities.has(preview.component(tile, 'city', cityIndex).key)))
+				addAffectedField(tile, index);
+		}
+	}
+	let priorDifference = 0, nextDifference = 0;
+	for (const component of before.values()) priorDifference += fieldAwardDifference(board, state, component, null, selfId, opponentId);
+	for (const component of after.values()) nextDifference += fieldAwardDifference(preview, state, component, addedMeeple, selfId, opponentId);
+	return nextDifference - priorDifference;
+}
+
+export function scoreShareDifference(owners, selfId, opponentId) {
+	const highest = Math.max(0, ...owners.values());
+	if (!highest) return 0;
+	return Number((owners.get(selfId) || 0) === highest) - Number((owners.get(opponentId) || 0) === highest);
+}
+
+export function mergerScoreDifferenceGain(sourcePoints, sourceOwners, targetPoints, targetOwners, selfId, opponentId) {
+	const before = sourcePoints * scoreShareDifference(sourceOwners, selfId, opponentId)
+		+ targetPoints * scoreShareDifference(targetOwners, selfId, opponentId);
+	const combined = new Map(sourceOwners);
+	for (const [playerId, count] of targetOwners) combined.set(playerId, (combined.get(playerId) || 0) + count);
+	return (sourcePoints + targetPoints) * scoreShareDifference(combined, selfId, opponentId) - before;
 }
 
 function featurePotential(board, tile, type, index, component, weights) {
@@ -59,7 +109,7 @@ function collectOwnedComponents(board, state, opponentId) {
 		const component = board.component(tile, type, index), key = `${type}:${component.key}`;
 		if (seen.has(key) || !component.openEdges.length) continue;
 		seen.add(key);
-		components.push({ type, component, tile, index, points: scoreFeature(board, tile, type, index) });
+		components.push({ type, component, tile, index, points: scoreFeature(board, tile, type, index), owners: componentOwners(board, state, component, type) });
 	}
 	return components;
 }
@@ -92,7 +142,7 @@ function oldTouchingComponents(board, state, candidate, weights, selfId, opponen
 			if (seen.has(key)) continue;
 			seen.add(key);
 			const owners = componentOwners(board, state, component, type);
-			old.push({ type, component, owners, potential: featurePotential(board, tile, type, index, component, weights) * ownershipDifference(owners, selfId, opponentId) });
+			old.push({ type, component, owners, potential: featurePotential(board, tile, type, index, component, weights) * scoreShareDifference(owners, selfId, opponentId) });
 		}
 	}
 	return old;
@@ -125,17 +175,24 @@ function evaluateOption(engine, preview, candidate, option, oldComponents, oppon
 		if (seen.has(key)) continue;
 		seen.add(key);
 		const owners = componentOwners(preview, state, component, type, addedMeeple);
-		const difference = ownershipDifference(owners, selfId, opponentId);
+		const difference = scoreShareDifference(owners, selfId, opponentId);
 		const completed = isComplete(preview, candidate, type, index);
-		if (completed && !state.scored.includes(component.key)) immediate += difference * scoreFeature(preview, candidate, type, index);
+		const points = scoreFeature(preview, candidate, type, index);
+		if (completed && !state.scored.includes(component.key)) immediate += difference * points;
 		else future += difference * featurePotential(preview, candidate, type, index, component, weights);
 		if (option?.type === type && component.features.some(item => item.tile.id === candidate.id && item.index === option.index)) chosenFeatureComplete = completed;
 		const touched = oldComponents.filter(entry => entry.type === type && entry.component.features.some(item => component.features.some(next => next.tile.id === item.tile.id && next.index === item.index)));
 		if (difference < 0) for (const entry of touched) obstruction += Math.max(0, component.openEdges.length - entry.component.openEdges.length);
-		if (difference >= 0 && touched.some(entry => (entry.owners.get(selfId) || 0) > 0) && touched.some(entry => (entry.owners.get(opponentId) || 0) > 0))
-			poach += Math.min(4, scoreFeature(preview, candidate, type, index)) / (1 + component.openEdges.length);
+		if (touched.some(entry => (entry.owners.get(selfId) || 0) > 0) && touched.some(entry => (entry.owners.get(opponentId) || 0) > 0)) {
+			const beforeDifference = touched.reduce((sum, entry) => {
+				const feature = entry.component.features[0];
+				return sum + scoreShareDifference(entry.owners, selfId, opponentId) * scoreFeature(state.board, feature.tile, type, feature.index);
+			}, 0);
+			poach += Math.min(4, Math.max(0, difference * points - beforeDifference)) / (1 + component.openEdges.length);
+		}
 		if (difference > 0 && component.openEdges.length) for (const target of opponentComponents) {
 			if (target.type !== type || touched.some(entry => entry.component.key === target.component.key)) continue;
+			if (mergerScoreDifferenceGain(points, owners, target.points, target.owners, selfId, opponentId) <= 0) continue;
 			let distance = Infinity;
 			for (const source of component.openEdges) for (const destination of target.component.openEdges) {
 				const a = midpoint(source.edge), b = midpoint(destination.edge);
@@ -155,7 +212,14 @@ function evaluateOption(engine, preview, candidate, option, oldComponents, oppon
 		} else if (tile.id === candidate.id && owner === selfId) future += weights.future * scoreFeature(preview, tile, 'monastery', 0) / 2;
 	}
 	let field = 0;
-	if (option?.type === 'field') field = weights.fieldFuture * (1 + scoreField(preview, candidate, option.index));
+	if (engine.fieldScoring) {
+		const fieldOption = option?.type === 'field' ? option.index : null;
+		const cacheKey = fieldOption === null ? 'without-field-meeple' : `field-${fieldOption}`;
+		preview._fieldScoreDeltaCache ||= new Map();
+		if (!preview._fieldScoreDeltaCache.has(cacheKey))
+			preview._fieldScoreDeltaCache.set(cacheKey, fieldScoreDifferenceDelta(state.board, preview, state, candidate, addedMeeple, selfId, opponentId));
+		field = weights.fieldFuture * preview._fieldScoreDeltaCache.get(cacheKey);
+	}
 	let newVertices = 0;
 	const counted = new Set(state.countedVertices);
 	for (const point of Object.values(verticesFor(candidate, preview.side))) {
@@ -190,10 +254,13 @@ function tacticalValue(engine, choice, pool, weights) {
 		const owners = componentOwners(preview, engine.state, own, type, { ref: preview.featureRef(choice.placement, type, choice.meeple.index), playerId: selfId });
 		if ((owners.get(selfId) || 0) >= (owners.get(opponentId) || 0) && own.openEdges.length) {
 			const source = { type, component: own };
-			for (const target of collectOwnedComponents(preview, engine.state, opponentId)) {
-				if (target.type !== type || target.component.key === own.key) continue;
-				const copies = oneTileBridgeCopies(preview, source, target, pool, engine.rules);
-				poaching = Math.max(poaching, Math.min(1, copies / 8));
+		for (const target of collectOwnedComponents(preview, engine.state, opponentId)) {
+			if (target.type !== type || target.component.key === own.key) continue;
+			const ownPoints = scoreFeature(preview, choice.placement, type, choice.meeple.index);
+			const gain = mergerScoreDifferenceGain(ownPoints, owners, target.points, target.owners, selfId, opponentId);
+			if (gain <= 0) continue;
+			const copies = oneTileBridgeCopies(preview, source, target, pool, engine.rules);
+			poaching = Math.max(poaching, Math.min(1, copies / 8) * Math.min(1, gain / 8));
 			}
 		}
 	}

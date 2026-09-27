@@ -2,6 +2,12 @@ const STORAGE_KEY = 'penrosanne-language';
 
 const messages = {
 	ja: {
+		'settings.frontierMode': '確定配置の探索方式', 'settings.frontierNormal': '通常', 'settings.frontierTemplate': 'テンプレート高速探索',
+		'mcts.cpuMode': 'CPUの種類', 'mcts.cpuFile': 'MCTS個体群JSON', 'mcts.cpuFileHelp': 'MCTSは2人・手札1枚に対応します。',
+		'mcts.cpuLoaded': '世代{generation}の最優秀個体 #{individual} を読み込みました。',
+		'mcts.cpuRequired': 'MCTS個体群JSONを読み込んでください。',
+		'mcts.cpuUnsupported': 'MCTS初版は2人・手札1枚の対局に対応します。', 'mcts.trainingLink': 'MCTS学習画面',
+		'nav.recorder': '手番の記録',
 		'log.open': 'プレイログを表示', 'log.close': 'プレイログを閉じる',
 		'setup.handMode': '手札モード', 'setup.singleHand': '通常（1枚）', 'setup.privatePlanning': '私的な都市計画（公開手札3枚）',
 		'setup.basicRule': 'ルール', 'setup.basic': 'ベーシック', 'setup.standard': 'スタンダード', 'setup.advanced': 'アドバンスト', 'setup.customRules': 'カスタムルール', 'setup.changed': '変更済み', 'setup.scoring': '得点', 'setup.titles': '称号', 'setup.placementRules': '設置規則', 'setup.singleHandShort': '1枚（ランダム）', 'setup.privatePlanningShort': '3枚（私的な都市計画）', 'setup.deckRoad': '道だけ', 'setup.deckLite': '簡易版', 'setup.deckStandard': '標準版', 'setup.deckExpansion': '拡張版', 'setup.estimatedTime': 'プレイ時間目安：{minutes}分',
@@ -37,6 +43,12 @@ const messages = {
 		'cpu.progressDiff': '途中スコア差／評価値', 'cpu.supervisedFitness': '教師あり評価',
 	},
 	en: {
+		'settings.frontierMode': 'Forced-placement search', 'settings.frontierNormal': 'Normal', 'settings.frontierTemplate': 'Fast templates',
+		'mcts.cpuMode': 'CPU type', 'mcts.cpuFile': 'MCTS population JSON', 'mcts.cpuFileHelp': 'MCTS supports two players with one tile per hand.',
+		'mcts.cpuLoaded': 'Loaded generation {generation}, champion #{individual}.',
+		'mcts.cpuRequired': 'Load an MCTS population JSON first.',
+		'mcts.cpuUnsupported': 'Initial MCTS supports two players and one tile per hand.', 'mcts.trainingLink': 'MCTS training',
+		'nav.recorder': 'Decision recorder',
 		'log.open': 'Show play log', 'log.close': 'Close play log',
 		'setup.handMode': 'Hand mode', 'setup.singleHand': 'Standard (1 tile)', 'setup.privatePlanning': 'Private City Planning (3 public tiles)',
 		'setup.basicRule': 'Rules', 'setup.basic': 'Basic', 'setup.standard': 'Standard', 'setup.advanced': 'Advanced', 'setup.customRules': 'Custom rules', 'setup.changed': 'Modified', 'setup.scoring': 'Scoring', 'setup.titles': 'Titles', 'setup.placementRules': 'Placement rules', 'setup.singleHandShort': '1 tile (random)', 'setup.privatePlanningShort': '3 tiles (Private City Planning)', 'setup.deckRoad': 'Road only', 'setup.deckLite': 'Lite', 'setup.deckStandard': 'Standard', 'setup.deckExpansion': 'Expansion', 'setup.estimatedTime': 'Estimated play time: {minutes} min',

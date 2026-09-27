@@ -57,7 +57,7 @@ export async function playBrowserTrainingMatch({ seed, policies, pattern, onTurn
 		await nextFrame();
 	}
 	return {
-		seed, patternSeed: pattern.seed, turns: actions.length, scores: game.state.players.map(player => player.score),
+		seed, patternSeed: pattern?.seed ?? null, turns: actions.length, scores: game.state.players.map(player => player.score),
 		discarded: game.state.discarded.length, elapsedMs: Math.round(performance.now() - started), actions,
 		turnEvaluations, phaseLeads,
 		phaseEvaluations: Object.fromEntries(Object.entries(phaseEvaluationSums).map(([phase, [sum0, count0, sum1, count1]]) => [phase, [count0 ? sum0 / count0 : 0, count1 ? sum1 / count1 : 0]])),

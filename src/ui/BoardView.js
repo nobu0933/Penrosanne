@@ -102,7 +102,8 @@ export class BoardView {
 			}
 			if (
 				this.previewTile &&
-				this.pointIsInTile(this.previewTile, world)
+				this.pointIsInTile(this.previewTile, world) &&
+				this.options.canDragPreview?.() !== false
 			) {
 				this.options.onPreviewDragStart?.(event);
 				return;
@@ -295,6 +296,11 @@ export class BoardView {
 			this.selected = hit._candidateKey || hit.id;
 			this.options.onSelect?.(hit);
 			this.render();
+			return;
+		}
+		if (this.options.onPlacedTileSelect) {
+			const placed = [...this.options.placed].reverse().find((tile) => this.pointIsInTile(tile, world));
+			if (placed) this.options.onPlacedTileSelect(placed);
 		}
 	}
 	markerAt(world) {

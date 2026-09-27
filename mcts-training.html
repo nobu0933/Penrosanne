@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+ <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+ <title>Penrosanne — MCTS Training</title><link rel="stylesheet" href="cpu-training.css">
+</head>
+<body><main>
+ <header><div><h1>MCTS Training</h1><p data-ja="MCTS個体を対戦・選抜します。D210の重みは固定です。" data-en="Train MCTS individuals. D210 weights stay fixed."></p></div><div class="header-actions"><select id="training-language" aria-label="Language"><option value="ja">日本語</option><option value="en">English</option></select><a href="index.html" data-ja="ゲームへ戻る" data-en="Back to game"></a></div></header>
+ <section class="controls">
+  <h2 data-ja="学習設定" data-en="Training settings"></h2>
+  <div class="source-controls"><label><span data-ja="起点となる個体群JSON（省略時は初期個体）" data-en="Starting population JSON (optional)"></span><input id="source-json" type="file" accept="application/json,.json"></label><label><span data-ja="世代名" data-en="Lineage name"></span><input id="lineage-name" type="text" maxlength="24" placeholder="MCTS"></label><p id="source-status" role="status"></p></div>
+  <div class="control-grid">
+   <label><span data-ja="学習盤面" data-en="Training board"></span><select id="training-board-mode"><option value="fixed" data-ja="固定盤面（従来・最速）" data-en="Fixed board (fastest)"></option><option value="dynamic-fast" data-ja="動的盤面（拡張テンプレート）" data-en="Dynamic board (vertex templates)"></option></select></label>
+   <label><span data-ja="個体数" data-en="Population"></span><input id="population-size" type="number" min="2" max="8" value="4"></label>
+   <label><span data-ja="世代数" data-en="Generations"></span><input id="generation-count" type="number" min="1" max="30" value="1"></label>
+   <label><span data-ja="変異の強さ" data-en="Mutation strength"></span><input id="mutation-strength" type="number" min="0.01" max="1" step="0.05" value="0.25"></label>
+   <label><span data-ja="1手の探索回数（予選）" data-en="Simulations per move (screening)"></span><input id="simulation-count" type="number" min="1" max="50" value="2"></label>
+   <label><span data-ja="乱数シード" data-en="Random seed"></span><input id="training-seed" type="number" min="0" step="1" value="1"></label>
+  </div>
+  <p class="small" data-ja="予選は現代表・ランダム寄り・前代表・攻撃型と対戦。上位のみ追加対戦し、最終候補は現代表と先後を交換して検証します。" data-en="Screen against incumbent, random-like, previous, and aggressive opponents. Survivors get extra games; the finalist swaps seats against the incumbent."></p>
+  <div class="actions"><button id="start-training" class="primary" data-ja="学習開始" data-en="Start training"></button><button id="stop-training" disabled data-ja="停止" data-en="Stop"></button></div>
+  <p id="training-status" role="status" aria-live="polite"></p>
+ </section>
+ <section class="history"><div class="history-heading"><h2 data-ja="最新世代の優秀個体群" data-en="Latest elite population"></h2><button id="export-population" disabled data-ja="最新1世代をJSONで書き出す" data-en="Export latest generation JSON"></button></div>
+  <p id="generation-summary"></p><div class="table-scroll"><table id="individual-table"></table></div>
+  <h3 data-ja="パラメーターと成績の相関（暫定）" data-en="Parameter / result correlations (provisional)"></h3><div class="table-scroll"><table id="effect-table"></table></div>
+ </section>
+ </main><script type="module" src="src/mcts-training.js"></script>
+</body></html>
